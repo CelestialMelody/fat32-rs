@@ -1,9 +1,15 @@
 #![no_std]
 pub mod bpb;
+pub mod dir;
+pub mod entry;
 pub mod fat;
 
+extern crate alloc;
+
 pub const LEAD_SIGNATURE: u32 = 0x41615252;
-pub const STRUC_SIGNATURE: u32 = 0x61417272;
+pub const STRUCT_SIGNATURE: u32 = 0x61417272;
+pub const TRAIL_SIGNATURE: u32 = 0xAA550000;
+
 pub const FREE_CLUSTER: u32 = 0x00000000;
 pub const END_CLUSTER: u32 = 0x0FFFFFF8;
 pub const BAD_CLUSTER: u32 = 0x0FFFFFF7;
@@ -29,5 +35,5 @@ pub const MAX_CLUSTER_FAT32: usize = 268435445;
 /// Bit HrdErrBitMask  -- If this bit is 1, no disk read/write errors were encountered.
 ///                       If this bit is 0, the file system driver encountered a disk I/O error on the Volume
 ///                       the last time it was mounted, which is an indicator that some sectors may have gone bad on the volume.
-pub const CLN_SHUT_BIT_MASK_FAT32: usize = 0x08000000;
-pub const HRD_ERR_BIT_MASK_FAT32: usize = 0x04000000;
+pub const CLN_SHUT_BIT_MASK_FAT32: u32 = 0x08000000;
+pub const HRD_ERR_BIT_MASK_FAT32: u32 = 0x04000000;
