@@ -33,8 +33,11 @@ pub const BLOCK_SIZE: usize = 512;
 pub const LONG_DIR_ENT_NAME_CAPACITY: usize = 13;
 pub const SHORT_DIR_ENT_NAME_CAPACITY: usize = 11;
 
+/// For Short Directory Entry Name[0] and Long Directory Entry Ord
 pub const DIR_ENTRY_UNUSED: u8 = 0xE5;
-pub const DIR_ENTRY_LAST_AND_UNUSED: u8 = 0x0;
+/// For Short Directory Entry Name[0]
+pub const DIR_ENTRY_LAST_AND_UNUSED: u8 = 0x00;
+/// For Long Directory Entry Ord as the last entry mask
 pub const LAST_LONG_ENTRY: u8 = 0x40;
 
 pub const MAX_CLUSTER_FAT12: usize = 4085;
