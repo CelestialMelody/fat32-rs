@@ -14,6 +14,9 @@ pub const FREE_CLUSTER: u32 = 0x00000000;
 pub const END_CLUSTER: u32 = 0x0FFFFFF8;
 pub const BAD_CLUSTER: u32 = 0x0FFFFFF7;
 
+/// End of Cluster Chain
+pub const EOC: u32 = 0x0FFFFFFF;
+
 pub const ATTR_READ_ONLY: u8 = 0x01;
 pub const ATTR_HIDDEN: u8 = 0x02;
 pub const ATTR_SYSTEM: u8 = 0x04;
@@ -22,9 +25,17 @@ pub const ATTR_DIRECTORY: u8 = 0x10;
 pub const ATTR_ARCHIVE: u8 = 0x20;
 pub const ATTR_LONG_NAME: u8 = ATTR_READ_ONLY | ATTR_HIDDEN | ATTR_SYSTEM | ATTR_VOLUME_ID;
 
-pub const DIRENT_SZ: usize = 32;
+pub const DIRENT_SIZE: usize = 32;
 pub const LONG_NAME_LEN: u32 = 13;
+/// Sector/BLOCK size
 pub const BLOCK_SIZE: usize = 512;
+
+pub const LONG_DIR_ENT_NAME_CAPACITY: usize = 13;
+pub const SHORT_DIR_ENT_NAME_CAPACITY: usize = 11;
+
+pub const DIR_ENTRY_UNUSED: u8 = 0xE5;
+pub const DIR_ENTRY_LAST_AND_UNUSED: u8 = 0x0;
+pub const LAST_LONG_ENTRY: u8 = 0x40;
 
 pub const MAX_CLUSTER_FAT12: usize = 4085;
 pub const MAX_CLUSTER_FAT16: usize = 65525;

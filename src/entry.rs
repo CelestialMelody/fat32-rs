@@ -42,12 +42,40 @@
 //! This is important if your machine is a “big endian” machine, because you will have to translate
 //! between big and little endian as you move data to and from the disk.
 
+//! When a directory is created, a file with the ATTR_DIRECTORY bit set in its DIR_Attr field, you set
+//! its DIR_FileSize to 0. DIR_FileSize is not used and is always 0 on a file with the
+//! ATTR_DIRECTORY attribute (directories are sized by simply following their cluster chains to the
+//! EOC mark). One cluster is allocated to the directory (unless it is the root directory on a FAT16/FAT12
+//! volume), and you set DIR_FstClusLO and DIR_FstClusHI to that cluster number and place an EOC
+//! mark in that clusters entry in the FAT. Next, you initialize all bytes of that cluster to 0. If the directory
+//! is the root directory, you are done (there are no dot or dotdot entries in the root directory). If the
+//! directory is not the root directory, you need to create two special entries in the first two 32-byte
+//! directory entries of the directory (the first two 32 byte entries in the data region of the cluster you
+//! just allocated): ".       " and "..      ".
+//!
+//! These are called the dot and dotdot entries. The DIR_FileSize field on both entries is set to 0, and all
+//! of the date and time fields in both of these entries are set to the same values as they were in the
+//! directory entry for the directory that you just created. You now set DIR_FstClusLO and
+//! DIR_FstClusHI for the dot entry (the first entry) to the same values you put in those fields for the
+//! directories directory entry (the cluster number of the cluster that contains the dot and dotdot entries).
+//!
+//! Finally, you set DIR_FstClusLO and DIR_FstClusHI for the dotdot entry (the second entry) to the
+//! first cluster number of the directory in which you just created the directory (value is 0 if this directory
+//! is the root directory even for FAT32 volumes).
+//!
+//! Here is the summary for the dot and dotdot entries:
+//! - The dot entry is a directory that points to itself.
+//! - The dotdot entry points to the starting cluster of the parent of this directory (which is 0 if this
+//!   directories parent is the root directory).
+
+//! FAT Long Directory Entries
+//!
 #![allow(unused)]
 
 use crate::dir::OpType;
 use crate::{
     ATTR_ARCHIVE, ATTR_DIRECTORY, ATTR_HIDDEN, ATTR_LONG_NAME, ATTR_READ_ONLY, ATTR_SYSTEM,
-    ATTR_VOLUME_ID,
+    ATTR_VOLUME_ID, LAST_LONG_ENTRY, LONG_DIR_ENT_NAME_CAPACITY,
 };
 
 use alloc::{
@@ -96,13 +124,13 @@ pub enum EntryType {
 ///
 /// TODO: Realize Time and Date
 //
-// 11+1+1+1+2+2+2+2+2+2+2+4 = 32
+// 8 + 3 + 1 + 1 + 1 + 1 + 2 + 2 + 2 + 4 + 4 = 32 bytes
 #[derive(Clone, Copy, Debug)]
 #[repr(packed)]
 pub struct ShortDirEntry {
     /// Short Name
     ///
-    /// size: (8+3) bytes    offset: 0 (0x0)
+    /// size: (8+3) bytes    offset: 0 (0x0~0xA)
     //
     //  文件名, 如果该目录项正在使用中 0x0 位置的值为文件名或子目录名的第一个字符, 如果该目录项未被使用
     //  name[0] 位置的值为 0x0, 如果该目录项曾经被使用过但是现在已经被删除则 name[0] 位置的值为 0xE5
@@ -140,23 +168,23 @@ pub struct ShortDirEntry {
     /// Time file was created
     /// The granularity of the seconds part of DIR_CrtTime is 2 seconds.
     ///
-    /// size: 2 bytes     offset: 14 Bytes (0xE)
+    /// size: 2 bytes     offset: 14 Bytes (0xE ~ 0xF)
     //
     //  文件创建日期, 16bit 也划分为三个部分:
     //    0~4bit 为日, 有效值为 1~31
     //    5~8bit 为月, 有效值为 1~12
-    //    9~15bit 为年, 有效值为 0~127，这是一个相对于 1980 年的年数值 (该值加上 1980 即为文件创建的日期值)
+    //    9~15bit 为年, 有效值为 0~127，这是一个相对于 1980 年的年数值 (该值加上 1980 即为文件创建的日期值 (1980–2107))
     crt_time: u16,
     /// Date file was created
     ///
-    /// size: 2 bytes     offset: 16 Bytes (0x10)
+    /// size: 2 bytes     offset: 16 Bytes (0x10~0x11)
     crt_date: u16,
     /// Last access date
     /// Note that there is no last access time, only a
     /// date. This is the date of last read or write. In the case of a write,
     /// this should be set to the same date as DIR_WrtDate.
     ///
-    /// size: 2 bytes     offset: 18 Bytes (0x12)
+    /// size: 2 bytes     offset: 18 Bytes (0x12~0x13)
     lst_acc_date: u16,
     /// High word (16 bis) of this entry's first cluster number (always 0 on FAT12 and FAT16)
     ///
@@ -181,7 +209,8 @@ pub struct ShortDirEntry {
     fst_clus_lo: u16,
     /// File size in bytes
     /// 32-bit (DWORD) unsigned holding this file's size in bytes
-    ///
+    /// DIR_FileSize is not used and is always 0 on a file with the ATTR_DIRECTORY attribute
+    /// (directories are sized by simply following their cluster chains to the EOC mark).
     /// size: 4 bytes     offset: 28 Bytes (0x1C~0x1F)
     //
     //  文件内容大小字节数，只对文件有效，子目录的目录项此处全部设置为 0
@@ -205,7 +234,7 @@ impl ShortDirEntry {
         item
     }
 
-    pub fn new_str(cluster: u32, name_str: &str, create_type: OpType) -> Self {
+    pub fn new_form_name_str(cluster: u32, name_str: &str, create_type: OpType) -> Self {
         let (name, extension) = match name_str.find('.') {
             Some(i) => (&name_str[0..i], &name_str[i + 1..]),
             None => (&name_str[0..], ""),
@@ -246,7 +275,7 @@ impl ShortDirEntry {
         unsafe { *(item.as_ptr() as *const ShortDirEntry) }
     }
 
-    pub fn new_bytes(cluster: u32, name_bytes: &[u8], create_type: OpType) -> Self {
+    pub fn new_from_name_bytes(cluster: u32, name_bytes: &[u8], create_type: OpType) -> Self {
         let mut item = [0; 32];
         item[0x00..0x0B].copy_from_slice(name_bytes);
 
@@ -377,6 +406,10 @@ impl ShortDirEntry {
         self.name[0] == 0xE5 || self.name[0] == 0x00 || self.name[0] == 0x05
     }
 
+    pub fn is_deleted(&self) -> bool {
+        self.name[0] == 0xE5
+    }
+
     pub fn is_valid_name(&self) -> bool {
         if self.name[0] < 0x20 {
             return self.name[0] == 0x05;
@@ -478,13 +511,9 @@ impl ShortDirEntry {
         self.get_name_uppercase().to_ascii_lowercase()
     }
 
-    pub fn clear(&mut self) {
+    pub fn delete(&mut self) {
         self.file_size = 0;
         self.set_first_cluster(0);
-    }
-
-    pub fn delete(&mut self) {
-        self.clear();
         self.name[0] = 0xE5;
     }
 
@@ -492,20 +521,287 @@ impl ShortDirEntry {
         unsafe { core::slice::from_raw_parts_mut(self as *mut ShortDirEntry as *mut u8, 32) }
     }
 
-    pub fn as_bytes_array_mut(&mut self) -> [u8; 32] {
-        let mut buf = [0; 32];
-        let len = core::mem::size_of::<ShortDirEntry>();
-        unsafe {
-            core::ptr::copy_nonoverlapping(
-                self as *mut ShortDirEntry as *mut u8,
-                buf.as_mut_ptr(),
-                len,
-            )
-        }
-        buf
+    pub fn as_bytes(&self) -> &[u8] {
+        unsafe { core::slice::from_raw_parts(self as *const ShortDirEntry as *const u8, 32) }
+    }
+
+    pub fn as_bytes_array_mut(&mut self) -> &mut [u8; 32] {
+        unsafe { &mut *(self as *mut ShortDirEntry as *mut [u8; 32]) }
+    }
+
+    pub fn as_bytes_array(&self) -> &[u8; 32] {
+        unsafe { &*(self as *const ShortDirEntry as *const [u8; 32]) }
     }
 
     pub fn from_buf(buf: &[u8]) -> Self {
         unsafe { *(buf.as_ptr() as *const ShortDirEntry) }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+#[repr(packed)]
+/// Long Directory Entry
+///
+/// 1 + 2*5 + 1 + 1 + 2 + 2*6 + 2 + 2*2 = 32 bytes
+pub struct LongDirEntry {
+    /// The order of this entry in the sequence of long dir entries.
+    /// It is associated with the short dir entry at the end of the long dir set,
+    /// and masked with 0x40 (`LAST_LONG_ENTRY`),
+    /// which indicates that the entry is the last long dir entry in a set of long dir entries.
+    /// All valid sets of long dir entries must begin with an entry having this mask.
+    ///
+    /// Long Dir Entry Order   size: 1 byte    offset: 0 (0x00)
+    //
+    //  长文件名目录项的序列号, 一个文件的第一个目录项序列号为 1, 然后依次递增. 如果是该文件的
+    //  最后一个长文件名目录项, 则将该目录项的序号与 0x40 进行 "或 (OR) 运算"的结果写入该位置.
+    //  如果该长文件名目录项对应的文件或子目录被删除, 则将该字节设置成删除标志0xE5
+    ord: u8,
+    /// Characters 1-5 of the long-name sub-component in this dir entry.
+    /// CharSet: Unicode. Codeing: UTF-16LE
+    ///
+    /// Long Dir Entry Name 1  size: 10 bytes  offset: 1 (0x01~0x0A)
+    //
+    //  长文件名的第 1~5 个字符. 长文件名使用 Unicode 码, 每个字符需要两个字节的空间.
+    //  如果文件名结束但还有未使用的字节, 则会在文件名后先填充两个字节的 "00", 然后开始使用 0xFF 填充
+    name1: [u16; 5],
+    /// Attributes - must be ATTR_LONG_NAME
+    ///
+    /// Long Dir Entry Attributes   size: 1 byte    offset: 11 (0x0B)
+    //
+    //  长目录项的属性标志, 一定是 0x0F
+    attr: u8,
+    /// If zero, indicates a directory entry that is a sub-component of a long name.
+    /// Other values reserved for future extensions.
+    /// Non-zero implies other dirent types.
+    ///
+    /// Long Dir Entry Type    size: 1 byte    offset: 12 (0x0C)   value: 0 (sub-component of long name)
+    ldir_type: u8,
+    /// Checksum of name in the short dir entry at the end of the long dir set.
+    ///
+    /// Checksum      size: 1 byte    offset: 13 (0x0D)
+    //
+    //  校验和. 如果一个文件的长文件名需要几个长文件名目录项进行存储, 则这些长文件名目录项具有相同的校验和.
+    chk_sum: u8,
+    /// Characters 6-11 of the long-name sub-component in this dir entry.
+    /// CharSet: Unicode. Codeing: UTF-16LE
+    ///
+    /// Long Dir Entry Name 2  size: 12 bytes  offset: 14 (0x0E~0x19)
+    name2: [u16; 6],
+    /// Must be ZERO.
+    /// This is an artifact of the FAT "first cluster",
+    /// and must be zero for compatibility with existing disk utilities.
+    /// It's meaningless in the context of a long dir entry.
+    ///
+    /// Long Dir Entry First Cluster Low   size: 2 bytes   offset: 26 (Ox1A~0x1B)     value: 0
+    //
+    //  文件名的第 6~11 个字符, 未使用的字节用 0xFF 填充
+    fst_clus_lo: u16,
+    /// Characters 12-13 of the long-name sub-component in this dir entry.
+    /// CharSet: Unicode. Codeing: UTF-16LE
+    ///
+    /// Long Dir Entry Name 3  size: 4 bytes   offset: 28 (0x1C~0x1F)
+    //
+    //  文件名的第 12~13 个字符, 未使用的字节用 0xFF 填充
+    name3: [u16; 2],
+}
+
+impl LongDirEntry {
+    pub fn new_form_name_slice(order: u8, name_array: [u16; 13]) -> Self {
+        let mut long_ent = Self::empty();
+
+        unsafe {
+            core::ptr::addr_of_mut!(long_ent.name1)
+                // try_into() 被用来尝试将 partial_name[..5] 转换成一个大小为 5 的固定大小数组
+                .write_unaligned(name_array[..5].try_into().expect("Failed to cast!"));
+            core::ptr::addr_of_mut!(long_ent.name2)
+                .write_unaligned(name_array[5..11].try_into().expect("Failed to cast!"));
+            core::ptr::addr_of_mut!(long_ent.name3)
+                .write_unaligned(name_array[11..].try_into().expect("Failed to cast!"));
+        }
+
+        debug_assert!(order < LAST_LONG_ENTRY);
+        long_ent.ord = order;
+
+        long_ent
+    }
+
+    fn new(order: u8, check_sum: u8, name_str: &str) -> Self {
+        let mut buf = [0; 32];
+        buf[0x00] = order;
+        buf[0x0B] = ATTR_LONG_NAME;
+        buf[0x0D] = check_sum;
+        Self::write_unicode(name_str, &mut buf);
+        Self::new_form_bytes(&buf)
+    }
+
+    pub fn name(&self) -> String {
+        let mut name_all: [u16; LONG_DIR_ENT_NAME_CAPACITY] = [0u16; LONG_DIR_ENT_NAME_CAPACITY];
+
+        name_all[..5].copy_from_slice(unsafe { &core::ptr::addr_of!(self.name1).read_unaligned() });
+        name_all[5..11]
+            .copy_from_slice(unsafe { &core::ptr::addr_of!(self.name2).read_unaligned() });
+        name_all[11..]
+            .copy_from_slice(unsafe { &core::ptr::addr_of!(self.name3).read_unaligned() });
+
+        let len = (0..name_all.len())
+            .find(|i| name_all[*i] == 0)
+            .unwrap_or(name_all.len());
+
+        // 从 UTF-16 编码的字节数组中解码出字符串
+        String::from_utf16_lossy(&name_all[..len])
+    }
+}
+
+impl LongDirEntry {
+    pub fn empty() -> Self {
+        Self {
+            ord: 0u8,
+            name1: [0u16; 5],
+            attr: ATTR_LONG_NAME,
+            ldir_type: 0u8,
+            chk_sum: 0u8,
+            name2: [0u16; 6],
+            fst_clus_lo: 0u16,
+            name3: [0u16; 2],
+        }
+    }
+
+    pub fn new_form_bytes(buf: &[u8]) -> Self {
+        unsafe { *(buf.as_ptr() as *const Self) }
+    }
+
+    pub fn attr(&self) -> u8 {
+        self.attr
+    }
+
+    pub fn order(&self) -> u8 {
+        self.ord
+    }
+
+    pub fn check_sum(&self) -> u8 {
+        self.chk_sum
+    }
+
+    pub fn is_free(&self) -> bool {
+        self.ord == 0x00 || self.ord == 0xE5
+    }
+
+    pub fn is_valid(&self) -> bool {
+        self.ord != 0xE5
+    }
+
+    pub fn is_deleted(&self) -> bool {
+        self.ord == 0xE5
+    }
+
+    pub fn delete(&mut self) {
+        self.ord = 0xE5;
+    }
+
+    fn write_unicode(value: &str, buf: &mut [u8]) {
+        let mut temp = [0xFF; 26];
+        let mut index = 0;
+
+        for i in value.encode_utf16() {
+            // u16 低 8 位
+            let part1 = (i & 0xFF) as u8;
+            // u16 高 8 位
+            let part2 = ((i & 0xFF00) >> 8) as u8;
+            temp[index] = part1;
+            temp[index + 1] = part2;
+            index += 2;
+        }
+
+        //  如果文件名结束但还有未使用的字节, 则会在文件名后先填充两个字节的 "00", 然后开始使用 0xFF 填充
+        if index != 26 {
+            temp[index] = 0;
+            temp[index + 1] = 0;
+        }
+
+        index = 0;
+
+        let mut op = |start: usize, end: usize| {
+            for i in (start..end).step_by(2) {
+                buf[i] = temp[index];
+                buf[i + 1] = temp[index + 1];
+                index += 2;
+            }
+        };
+
+        op(0x01, 0x0A);
+        op(0x0E, 0x19);
+        op(0x1C, 0x1F);
+    }
+
+    fn name_to_utf8(&self) -> ([u8; 13 * 3], usize) {
+        let (mut utf8, mut len) = ([0; 13 * 3], 0);
+
+        let mut op = |parts: &[u16]| {
+            for i in (0..parts.len()) {
+                let unicode: u16 = parts[i];
+                if unicode == 0 || unicode == 0xFFFF {
+                    break;
+                }
+
+                // UTF-16 转 UTF-8 编码
+                // UTF-8 编码的规则:
+                // 如果代码点在 0x80 以下 (即 ASCII 字符), 则使用 1 个字节的编码表示, 即 0xxxxxxx (其中 x 表示可用的位)
+                // 如果代码点在 0x80 到 0x7FF 之间, 则使用 2 个字节的编码表示, 即 110xxxxx 10xxxxxx.
+                // 如果代码点在 0x800 到 0xFFFF 之间, 则使用 3 个字节的编码表示，即 1110xxxx 10xxxxxx 10xxxxxx
+                // 如果代码点在 0x10000 到 0x10FFFF 之间, 则使用 4 个字节的编码表示，即 11110xxx 10xxxxxx 10xxxxxx 10xxxxxx
+                if unicode <= 0x007F {
+                    utf8[len] = unicode as u8;
+                    len += 1;
+                } else if unicode >= 0x0080 && unicode <= 0x07FF {
+                    let part1 = (0b11000000 | (0b00011111 & (unicode >> 6))) as u8;
+                    let part2 = (0b10000000 | (0b00111111) & unicode) as u8;
+
+                    utf8[len] = part1;
+                    utf8[len + 1] = part2;
+                    len += 2;
+                } else if unicode >= 0x0800 {
+                    let part1 = (0b11100000 | (0b00011111 & (unicode >> 12))) as u8;
+                    let part2 = (0b10000000 | (0b00111111) & (unicode >> 6)) as u8;
+                    let part3 = (0b10000000 | (0b00111111) & unicode) as u8;
+
+                    utf8[len] = part1;
+                    utf8[len + 1] = part2;
+                    utf8[len + 2] = part3;
+                    len += 3;
+                }
+            }
+        };
+
+        unsafe {
+            op(&core::ptr::addr_of!(self.name1).read_unaligned());
+            op(&core::ptr::addr_of!(self.name2).read_unaligned());
+            op(&core::ptr::addr_of!(self.name3).read_unaligned());
+        }
+
+        (utf8, len)
+    }
+
+    fn name_cnt(&self) -> usize {
+        self.ord as usize & 0x1F
+    }
+
+    fn is_name_end(&self) -> bool {
+        (self.ord & 0x40) == 0x40
+    }
+
+    fn as_bytes_array(&self) -> [u8; 32] {
+        unsafe { core::ptr::read_unaligned(self as *const Self as *const [u8; 32]) }
+    }
+
+    fn as_bytes_array_mut(&mut self) -> &mut [u8; 32] {
+        unsafe { &mut *(self as *mut Self as *mut [u8; 32]) }
+    }
+
+    fn as_bytes(&self) -> &[u8] {
+        unsafe { core::slice::from_raw_parts(self as *const Self as *const u8, 32) }
+    }
+
+    fn as_bytes_mut(&mut self) -> &mut [u8] {
+        unsafe { core::slice::from_raw_parts_mut(self as *mut Self as *mut u8, 32) }
     }
 }
