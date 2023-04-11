@@ -68,6 +68,124 @@
 //! - The dotdot entry points to the starting cluster of the parent of this directory (which is 0 if this
 //!   directories parent is the root directory).
 
+//! Organization and Association of Short & Long Directory Entries
+//!
+//! A set of long entries is always associated with a short entry that they always immediately precede.
+//! Long entries always immediately precede and are physically contiguous with, the short entry they are
+//! associated with. The file system makes a few other checks to ensure that a set of long entries is
+//! actually associated with a short entry.
+//!
+//! First, every member of a set of long entries is uniquely numbered and the last member of the set is or'd
+//! with a flag indicating that it is, in fact, the last member of the set. The LDIR_Ord field is used to
+//! make this determination. The first member of a set has an LDIR_Ord value of one. The nth long
+//! member of the set has a value of (n OR LAST_LONG_ENTRY). Note that the LDIR_Ord field
+//! cannot have values of 0xE5 or 0x00. These values have always been used by the file system to
+//! indicate a "free" directory entry, or the "last" directory entry in a cluster. Values for LDIR_Ord do not
+//! take on these two values over their range. Values for LDIR_Ord must run from 1 to (n OR
+//! LAST_LONG_ENTRY). If they do not, the long entries are "damaged" and are treated as orphans by
+//! the file system.
+//!
+//! Second, an 8-bit checksum is computed on the name contained in the short directory entry at the time
+//! the short and long directory entries are created. All 11 characters of the name in the short entry are
+//! used in the checksum calculation. The check sum is placed in every long entry. If any of the check
+//! sums in the set of long entries do not agree with the computed checksum of the name contained in the
+//! short entry, then the long entries are treated as orphans.
+//!
+//! Sum = 0;
+//! for (FcbNameLen=11; FcbNameLen!=0; FcbNameLen--) {
+//!     Sum = ((Sum & 1) ? 0x80 : 0) + (Sum >> 1) + *pFcbName++;
+//! }
+//!
+//! As a consequence of this pairing, the short directory entry serves as the structure that contains fields
+//! like: last access date, creation time, creation date, first cluster, and size.
+//!  long directory entries are free to contain new
+//! information and need not replicate information already available in the short entry. Principally, the
+//! long entries contain the long name of a file. The name contained in a short entry which is associated
+//! with a set of long entries is termed the alias name, or simply alias, of the file.
+
+//！Storage of a Long-Name Within Long Directory Entries
+//!
+//! A long name can consist of more characters than can fit in a single long directory entry. When this
+//! occurs the name is stored in more than one long entry. In any event, the name fields themselves
+//! within the long entries are disjoint. The following example is provided to illustrate how a long name
+//! is stored across several long directory entries. Names are also NUL terminated and padded with
+//! 0xFFFF characters in order to detect corruption of long name fields by errant disk utilities. A name
+//! that fits exactly in a n long directory entries (i.e. is an integer multiple of 13) is not NUL terminated
+//! and not padded with 0xFFFFs.
+
+//! Short Directory Entries
+//!
+//! [`ShortDirEntry`]
+//!
+//! Short names are limited to 8 characters followed by an optional period (.) and extension of up to 3
+//! characters. The total path length of a short name cannot exceed 80 characters (64 char path + 3 drive
+//! letter + 12 for 8.3 name + NUL) including the trailing NUL. The characters may be any combination
+//! of letters, digits, or characters with code point values greater than 127. The following special
+//! characters are also allowed: $  % ' - _ @ ~ ` ! ( ) { } ^ # &
+//!
+//! Names are stored in a short directory entry in the OEM code page that the system is configured for at
+//! the time the directory entry is created.
+//!
+//! Short names passed to the file system are always converted to upper case and their original case value
+//! is lost. One problem that is generally true of most OEM code pages is that they map lower to upper
+//! case extended characters in a non-unique fashion. That is, they map multiple extended characters to a
+//! single upper case character. This creates problems because it does not preserve the information that
+//! the extended character provides. This mapping also prevents the creation of some file names that
+//! would normally differ, but because of the mapping to upper case they become the same file name.
+//!
+
+//! Long Directory Entries
+//!
+//! [`LongDirEntry`]
+//!
+//! Long names are limited to 255 characters, not including the trailing NUL. The total path length of a
+//! long name cannot exceed 260 characters, including the trailing NUL. The characters may be any
+//! combination of those defined for short names with the addition of the period (.) character used
+//! multiple times within the long name. A space is also a valid character in a long name as it always has
+//! been for a short name. However, in short names it typically is not used. The following six special
+//! characters are now allowed in a long name. They are not legal in a short name: + , ; = [ ]
+//!
+//! Embedded spaces within a long name are allowed. Leading and trailing spaces in a long name are
+//! ignored.
+//!
+//! Leading and embedded periods are allowed in a name and are stored in the long name. Trailing
+//! periods are ignored.
+//!
+//! Long names are stored in long directory entries in UNICODE. UNICODE characters are 16-bit
+//! characters. It is not be possible to store UNICODE in short directory entries since the names stored
+//! there are 8-bit characters or DBCS characters.
+//!
+//! Long names passed to the file system are not converted to upper case and their original case value is
+//! preserved. UNICODE solves the case mapping problem prevalent in some OEM code pages by
+//! always providing a translation for lower case characters to a single, unique upper case character.
+
+//! Name Matching In Short & Long Names
+//!
+//! The names contained in the set of all short directory entries are termed the "short name space". The
+//! names contained in the set of all long directory entries are termed the "long name space". Together,
+//! they form a single unified name space in which no duplicate names can exist. That is: any name
+//! within a specific directory, whether it is a short name or a long name, can occur only once in the name
+//! space. Furthermore, although the case of a name is preserved in a long name, no two names can have
+//! the same name although the names on the media actually differ by case. That is names like "foobar"
+//! cannot be created if there is already a short entry with a name of "FOOBAR" or a long name with a
+//! name of "FooBar".
+//!
+//! All types of search operations within the file system (i.e. find, open, create, delete, rename) are case-
+//! insensitive. An open of "FOOBAR" will open either "FooBar" or "foobar" if one or the other exists.
+//! A find using "FOOBAR" as a pattern will find the same files mentioned. The same rules are also true
+//! for extended characters that are accented.
+//!
+//! A short name search operation checks only the names of the short directory entries for a match. A
+//! long name search operation checks both the long and short directory entries. As the file system
+//! traverses a directory, it caches the long-name sub-components contained in long directory entries. As
+//! soon as a short directory entry is encountered that is associated with the cached long name, the long
+//! name search operation will check the cached long name first and then the short name for a match.
+//!
+//! When a character on the media, whether it is stored in the OEM character set or in UNICODE, cannot
+//! be translated into the appropriate character in the OEM or ANSI code page, it is always "translated" to
+//! the "_" (underscore) character as it is returned to the user – it is NOT modified on the disk. This
+//! character is the same in all OEM code pages and ANSI.
+
 //! FAT Long Directory Entries
 //!
 #![allow(unused)]
@@ -75,7 +193,8 @@
 use crate::dir::OpType;
 use crate::{
     ATTR_ARCHIVE, ATTR_DIRECTORY, ATTR_HIDDEN, ATTR_LONG_NAME, ATTR_READ_ONLY, ATTR_SYSTEM,
-    ATTR_VOLUME_ID, LAST_LONG_ENTRY, LONG_DIR_ENT_NAME_CAPACITY,
+    ATTR_VOLUME_ID, DIR_ENTRY_LAST_AND_UNUSED, DIR_ENTRY_UNUSED, LAST_LONG_ENTRY,
+    LONG_DIR_ENT_NAME_CAPACITY,
 };
 
 use alloc::{
@@ -83,7 +202,8 @@ use alloc::{
     string::{String, ToString},
     vec::Vec,
 };
-use core::{convert::TryInto, fmt::Debug, mem};
+use core::fmt::Debug;
+use core::{convert, fmt, mem, str};
 
 #[derive(PartialEq, Debug, Clone, Copy)]
 #[repr(u8)]
@@ -110,14 +230,6 @@ pub enum FATAttr {
     AttrArchive = ATTR_ARCHIVE, // 归档
     /// Idicates that the “file” is actually part of the long name entry for some other file.
     AttrLongName = ATTR_LONG_NAME, // 长文件名
-}
-
-#[derive(PartialEq, Debug, Clone, Copy, PartialOrd)]
-pub enum EntryType {
-    Dir,
-    File,
-    LFN,
-    Deleted,
 }
 
 /// FAT 32 Byte Directory Entry Structure
@@ -251,6 +363,9 @@ impl ShortDirEntry {
         item[0x08..0x08 + extension.len()].copy_from_slice(extension.as_bytes());
 
         // 将 name 和 ext 部分转换为大写
+        //
+        // "Short names passed to the file system are always converted to upper case and their original case value is lost"
+        //
         // item[0x00..0x00 + name.len()].make_ascii_uppercase();
         // item[0x08..0x08 + extension.len()].make_ascii_uppercase();
 
@@ -291,6 +406,15 @@ impl ShortDirEntry {
         }
 
         unsafe { *(item.as_ptr() as *const ShortDirEntry) }
+    }
+
+    pub fn set_name(&mut self, name: &[u8], extension: &[u8]) {
+        let mut name_: [u8; 8] = [0x20; 8];
+        name_[0..name.len()].copy_from_slice(name);
+
+        let mut extension_: [u8; 3] = [0x20; 3];
+        extension_[0..extension.len()].copy_from_slice(extension);
+        self.name = name_;
     }
 
     pub fn check_sum(&self) -> u8 {
@@ -337,7 +461,7 @@ impl ShortDirEntry {
         }
     }
 
-    pub fn full_name_bytes_array(&self) -> ([u8; 12], usize) {
+    pub fn name_bytes_array_with_dot(&self) -> ([u8; 12], usize) {
         let mut len = 0;
         let mut full_name = [0; 12];
 
@@ -361,6 +485,27 @@ impl ShortDirEntry {
         }
 
         (full_name, len)
+    }
+
+    pub fn name_bytes_array(&self) -> [u8; 11] {
+        let mut full_name = [0; 11];
+        let mut len = 0;
+
+        for &i in self.name.iter() {
+            if i != 0x20 {
+                full_name[len] = i;
+                len += 1;
+            }
+        }
+
+        for &i in self.extension.iter() {
+            if i != 0x20 {
+                full_name[len] = i;
+                len += 1;
+            }
+        }
+
+        full_name
     }
 }
 
@@ -403,11 +548,13 @@ impl ShortDirEntry {
 
     /// directory entry is free
     pub fn is_free(&self) -> bool {
-        self.name[0] == 0xE5 || self.name[0] == 0x00 || self.name[0] == 0x05
+        self.name[0] == DIR_ENTRY_UNUSED
+            || self.name[0] == DIR_ENTRY_LAST_AND_UNUSED
+            || self.name[0] == 0x05
     }
 
     pub fn is_deleted(&self) -> bool {
-        self.name[0] == 0xE5
+        self.name[0] == DIR_ENTRY_UNUSED
     }
 
     pub fn is_valid_name(&self) -> bool {
@@ -477,6 +624,10 @@ impl ShortDirEntry {
         self.attr as u8
     }
 
+    pub fn set_attr(&mut self, attr: u8) {
+        self.attr = attr;
+    }
+
     pub fn file_size(&self) -> u32 {
         self.file_size
     }
@@ -514,7 +665,7 @@ impl ShortDirEntry {
     pub fn delete(&mut self) {
         self.file_size = 0;
         self.set_first_cluster(0);
-        self.name[0] = 0xE5;
+        self.name[0] = DIR_ENTRY_UNUSED;
     }
 
     pub fn as_bytes_mut(&mut self) -> &mut [u8] {
@@ -529,11 +680,17 @@ impl ShortDirEntry {
         unsafe { &mut *(self as *mut ShortDirEntry as *mut [u8; 32]) }
     }
 
+    pub fn to_bytes_array(&self) -> [u8; 32] {
+        let mut bytes = [0u8; 32];
+        bytes.copy_from_slice(self.as_bytes());
+        bytes
+    }
+
     pub fn as_bytes_array(&self) -> &[u8; 32] {
         unsafe { &*(self as *const ShortDirEntry as *const [u8; 32]) }
     }
 
-    pub fn from_buf(buf: &[u8]) -> Self {
+    pub fn new_from_bytes(buf: &[u8]) -> Self {
         unsafe { *(buf.as_ptr() as *const ShortDirEntry) }
     }
 }
@@ -543,6 +700,8 @@ impl ShortDirEntry {
 /// Long Directory Entry
 ///
 /// 1 + 2*5 + 1 + 1 + 2 + 2*6 + 2 + 2*2 = 32 bytes
+//
+//  TODE: Name charactor check
 pub struct LongDirEntry {
     /// The order of this entry in the sequence of long dir entries.
     /// It is associated with the short dir entry at the end of the long dir set,
@@ -625,6 +784,18 @@ impl LongDirEntry {
         long_ent
     }
 
+    pub fn set_name(&mut self, name_array: [u16; 13]) {
+        unsafe {
+            core::ptr::addr_of_mut!(self.name1)
+                // try_into() 被用来尝试将 partial_name[..5] 转换成一个大小为 5 的固定大小数组
+                .write_unaligned(name_array[..5].try_into().expect("Failed to cast!"));
+            core::ptr::addr_of_mut!(self.name2)
+                .write_unaligned(name_array[5..11].try_into().expect("Failed to cast!"));
+            core::ptr::addr_of_mut!(self.name3)
+                .write_unaligned(name_array[11..].try_into().expect("Failed to cast!"));
+        }
+    }
+
     fn new(order: u8, check_sum: u8, name_str: &str) -> Self {
         let mut buf = [0; 32];
         buf[0x00] = order;
@@ -683,15 +854,15 @@ impl LongDirEntry {
     }
 
     pub fn is_free(&self) -> bool {
-        self.ord == 0x00 || self.ord == 0xE5
+        self.ord == 0x00 || self.ord == DIR_ENTRY_UNUSED
     }
 
     pub fn is_valid(&self) -> bool {
-        self.ord != 0xE5
+        self.ord != DIR_ENTRY_UNUSED
     }
 
     pub fn is_deleted(&self) -> bool {
-        self.ord == 0xE5
+        self.ord == DIR_ENTRY_UNUSED
     }
 
     pub fn delete(&mut self) {
@@ -781,11 +952,11 @@ impl LongDirEntry {
         (utf8, len)
     }
 
-    fn name_cnt(&self) -> usize {
-        self.ord as usize & 0x1F
+    fn lde_order(&self) -> usize {
+        (self.ord & (LAST_LONG_ENTRY - 1)) as usize
     }
 
-    fn is_name_end(&self) -> bool {
+    fn is_lde_end(&self) -> bool {
         (self.ord & 0x40) == 0x40
     }
 
@@ -797,11 +968,459 @@ impl LongDirEntry {
         unsafe { &mut *(self as *mut Self as *mut [u8; 32]) }
     }
 
+    fn to_bytes_array(&self) -> [u8; 32] {
+        let mut buf = [0; 32];
+        buf.copy_from_slice(self.as_bytes());
+        buf
+    }
+
     fn as_bytes(&self) -> &[u8] {
         unsafe { core::slice::from_raw_parts(self as *const Self as *const u8, 32) }
     }
 
     fn as_bytes_mut(&mut self) -> &mut [u8] {
         unsafe { core::slice::from_raw_parts_mut(self as *mut Self as *mut u8, 32) }
+    }
+}
+
+#[derive(PartialEq, Debug, Clone, Copy, PartialOrd)]
+pub enum EntryType {
+    Dir,
+    File,
+    LFN, // Long File Name
+    Deleted,
+}
+
+impl Default for EntryType {
+    fn default() -> Self {
+        EntryType::Dir
+    }
+}
+
+impl EntryType {
+    fn from_value(value: u8) -> EntryType {
+        if (value & ATTR_DIRECTORY) == ATTR_DIRECTORY {
+            EntryType::Dir
+        } else if value == ATTR_LONG_NAME {
+            EntryType::LFN
+        } else {
+            EntryType::File
+        }
+    }
+
+    fn from_create(value: OpType) -> EntryType {
+        match value {
+            OpType::Dir => EntryType::Dir,
+            OpType::File => EntryType::File,
+        }
+    }
+}
+
+#[derive(Default, Copy, Clone)]
+pub struct Entry {
+    pub(crate) item_type: EntryType,
+    pub(crate) sde: Option<ShortDirEntry>,
+    pub(crate) lde: Option<LongDirEntry>,
+}
+
+impl Entry {
+    pub(crate) fn first_cluster(&self) -> u32 {
+        self.sde.unwrap().first_cluster()
+    }
+
+    pub(crate) fn set_first_cluster(&mut self, cluster: u32) {
+        self.sde.as_mut().unwrap().set_first_cluster(cluster);
+    }
+
+    fn short_file_name_bytes_array(&self) -> Option<([u8; 12], usize)> {
+        if self.sde.is_some() {
+            Some(self.sde.as_ref().unwrap().name_bytes_array_with_dot())
+        } else {
+            None
+        }
+    }
+
+    fn short_file_name(&self) -> Option<String> {
+        if self.sde.is_some() {
+            Some(self.sde.as_ref().unwrap().name())
+        } else {
+            None
+        }
+    }
+
+    fn long_file_name_to_utf8_bytes_array(&self) -> Option<([u8; 13 * 3], usize)> {
+        if self.lde.is_some() {
+            Some(self.lde.as_ref().unwrap().name_to_utf8())
+        } else {
+            None
+        }
+    }
+
+    fn long_file_name(&self) -> Option<String> {
+        if self.lde.is_some() {
+            Some(self.lde.as_ref().unwrap().name())
+        } else {
+            None
+        }
+    }
+
+    pub(crate) fn lde_order(&self) -> Option<usize> {
+        if self.lde.is_some() {
+            Some(self.lde.as_ref().unwrap().lde_order())
+        } else {
+            None
+        }
+    }
+
+    pub(crate) fn is_lde_end(&self) -> Option<bool> {
+        if self.lde.is_some() {
+            Some(self.lde.as_ref().unwrap().is_lde_end())
+        } else {
+            None
+        }
+    }
+
+    pub(crate) fn file_size(&self) -> Option<usize> {
+        if self.sde.is_some() {
+            Some(self.sde.as_ref().unwrap().file_size() as usize)
+        } else {
+            None
+        }
+    }
+
+    // TODO: Check or Change or not
+    pub(crate) fn to_bytes_array(&self) -> [u8; 32] {
+        if self.sde.is_some() {
+            self.sde.as_ref().unwrap().to_bytes_array()
+        } else {
+            self.lde.as_ref().unwrap().to_bytes_array()
+        }
+    }
+
+    pub(crate) fn new_lde(order: u8, check_sum: u8, name: &str) -> Self {
+        Self {
+            item_type: EntryType::LFN,
+            sde: None,
+            lde: Some(LongDirEntry::new(order, check_sum, name)),
+        }
+    }
+
+    pub(crate) fn new_sde_from_name_str(cluster: u32, name: &str, create_type: OpType) -> Self {
+        Self {
+            item_type: EntryType::from_create(create_type),
+            sde: Some(ShortDirEntry::new_form_name_str(cluster, name, create_type)),
+            lde: None,
+        }
+    }
+
+    pub(crate) fn new_sde_from_name_bytes(cluster: u32, name: &[u8], create_type: OpType) -> Self {
+        Self {
+            item_type: EntryType::from_create(create_type),
+            sde: Some(ShortDirEntry::new_from_name_bytes(
+                cluster,
+                name,
+                create_type,
+            )),
+            lde: None,
+        }
+    }
+
+    pub(crate) fn root_dir(cluster: u32) -> Self {
+        Self {
+            sde: Some(ShortDirEntry::root_dir(cluster)),
+            ..Self::default()
+        }
+    }
+
+    pub(crate) fn from_buf(buf: &[u8]) -> Self {
+        let item_type = if buf[0x00] == 0xE5 {
+            EntryType::Deleted
+        } else {
+            EntryType::from_value(buf[0x0B])
+        };
+
+        match item_type {
+            EntryType::LFN => Self {
+                item_type,
+                sde: None,
+                lde: Some(LongDirEntry::new_form_bytes(buf)),
+            },
+            _ => Self {
+                item_type,
+                sde: Some(ShortDirEntry::new_from_bytes(buf)),
+                lde: None,
+            },
+        }
+    }
+
+    pub(crate) fn sde_equal(&self, name: &str) -> bool {
+        if self.is_deleted() {
+            return false;
+        }
+        let option = self.short_file_name_bytes_array();
+        if option.is_none() {
+            return false;
+        }
+        let (bytes, len) = option.unwrap();
+        if let Ok(res) = str::from_utf8(&bytes[0..len]) {
+            name.eq_ignore_ascii_case(res)
+        } else {
+            false
+        }
+    }
+
+    pub(crate) fn lde_equal(&self, name: &str) -> bool {
+        if self.is_deleted() {
+            return false;
+        }
+        let option = self.long_file_name_to_utf8_bytes_array();
+        if option.is_none() {
+            return false;
+        }
+        let (bytes, len) = option.unwrap();
+        if let Ok(res) = str::from_utf8(&bytes[0..len]) {
+            name.eq_ignore_ascii_case(res)
+        } else {
+            false
+        }
+    }
+
+    pub(crate) fn set_file_size(&mut self, size: usize) {
+        self.sde.as_mut().unwrap().set_file_size(size as u32)
+    }
+
+    pub(crate) fn is_lfn(&self) -> bool {
+        EntryType::LFN == self.item_type
+    }
+
+    pub(crate) fn is_deleted(&self) -> bool {
+        EntryType::Deleted == self.item_type
+    }
+
+    pub(crate) fn is_dir(&self) -> bool {
+        EntryType::Dir == self.item_type
+    }
+
+    pub(crate) fn is_file(&self) -> bool {
+        EntryType::File == self.item_type
+    }
+
+    pub(crate) fn check_sum(&self) -> Option<u8> {
+        if self.lde.is_some() {
+            Some(self.lde.as_ref().unwrap().check_sum())
+        } else if self.sde.is_some() {
+            Some(self.sde.as_ref().unwrap().check_sum())
+        } else {
+            None
+        }
+    }
+}
+
+impl Entry {
+    /// Test whether `self` is a short entry
+    /// and whether the short entry name of `self` is the same type of `prefix`.
+    pub fn gen_short_name_numtail(v: Vec<Entry>, name_res: &mut [u8; 11]) {
+        if v.iter()
+            .find(|i| i.sde.unwrap().name_bytes_array()[..] == name_res[..])
+            .is_none()
+        {
+            return;
+        }
+        let mut baselen: usize = name_res
+            .iter()
+            .enumerate()
+            .find(|i| *i.1 == ' ' as u8)
+            .map_or_else(|| 8, |i| i.0);
+        let numtail2_baselen = 2;
+        let numtail_baselen = 6;
+        // 如果基本文件名超过6位(7或者8),则其文件名
+        if baselen > 6 {
+            //这时候优先用最后两位
+            baselen = numtail_baselen;
+            name_res[7] = ' ' as u8;
+        }
+        // 将文件基本名长度处替换为~,尝试单个数字
+        name_res[baselen] = '~' as u8;
+        for i in 1..10 {
+            name_res[baselen + 1] = i + '0' as u8;
+            // 如果单个数字能确保找不到,则用单个数字
+            if v.iter()
+                .find(|i| i.sde.unwrap().name_bytes_array() == name_res[..])
+                .is_none()
+            {
+                return;
+            }
+        }
+        //好吧,如果到这里就是都找到了
+        //然后开始伪随机
+        let token = 19382022; //随便选的数字
+        let mut i = token & 0xffff;
+        let sz = ((token >> 10) & 0x7) as u8;
+        if baselen > 2 {
+            //如果基本名长度超过2则使用6位数字
+            baselen = numtail2_baselen;
+            name_res[7] = ' ' as u8;
+        }
+
+        name_res[baselen + 4] = '~' as u8;
+        name_res[baselen + 5] = '1' as u8 + sz;
+        loop {
+            name_res[baselen..baselen + 4]
+                .copy_from_slice(&(format!("{:04X}", i).as_bytes())[0..4]);
+            if v.iter()
+                .find(|i| i.sde.unwrap().name_bytes_array()[..] == name_res[..])
+                .is_none()
+            {
+                break;
+            }
+            i -= 11;
+        }
+    }
+    /// Embedded spaces within a long name are allowed.
+    /// Leading and trailing spaces in a long name are ignored.
+    /// Leading and embedded periods are allowed in a name and are stored in the long name.
+    /// Trailing periods are ignored.
+    /// No '~' or trailing numbers
+    pub fn gen_short_name_prefix(mut s: String) -> String {
+        s.replace(" ", "");
+        s.make_ascii_uppercase();
+        let split_res = s.rsplit_once('.');
+        let (base, ext) = if split_res.is_some() {
+            split_res.unwrap()
+        } else {
+            (&s[..], "")
+        };
+        let (base, ext) = if base.len() == 0 && ext.len() != 0 {
+            (ext, base)
+        } else {
+            (base, ext)
+        };
+        let base = {
+            let mut i = 0;
+            while i != base.len() && base[i..].starts_with('.') {
+                i += 1;
+            }
+            if i == base.len() {
+                base
+            } else {
+                &base[i..]
+            }
+        };
+        // not sure if this should be a `trim_matches` or a `trim_start_matches`
+        let base = base.trim_start_matches('.');
+
+        let base = if ext.len() != 0 || base.len() != 0 {
+            format!("{: <8}", base.split_at(8.min(base.len())).0)
+        } else {
+            "".to_string()
+        };
+        let ext = if ext.len() != 0 || base.len() != 0 {
+            format!("{: <3}", ext.split_at(3.min(ext.len())).0)
+        } else {
+            "".to_string()
+        };
+        [base, ext].concat()
+    }
+
+    pub fn empty() -> Self {
+        Self {
+            item_type: EntryType::default(),
+            sde: Some(ShortDirEntry::empty()),
+            lde: Some(LongDirEntry::empty()),
+        }
+    }
+
+    pub fn unused_not_last_entry() -> Self {
+        let mut item = Self::empty();
+        item.sde.unwrap().as_bytes_array_mut()[0] = DIR_ENTRY_UNUSED;
+        item
+    }
+
+    pub fn unused_and_last_entry() -> Self {
+        let mut item = Self::empty();
+        item.sde.unwrap().as_bytes_array_mut()[0] = DIR_ENTRY_LAST_AND_UNUSED;
+        item
+    }
+
+    pub fn is_last_long_dir_entry(&self) -> Option<bool> {
+        if self.lde.is_some() {
+            Some(self.lde.unwrap().is_lde_end())
+        } else {
+            None
+        }
+    }
+
+    // TODO: more ways to set name
+    pub fn set_sde_name(&mut self, name: [u8; 11]) -> Option<bool> {
+        if self.sde.is_some() {
+            self.sde.unwrap().set_name(&name[..8], &name[8..]);
+            Some(true)
+        } else {
+            None
+        }
+    }
+
+    // TODO: more ways to set name
+    pub fn set_lde_name(&mut self, name: [u16; 13]) -> Option<bool> {
+        if self.lde.is_some() {
+            self.lde.unwrap().set_name(name);
+            Some(true)
+        } else {
+            None
+        }
+    }
+
+    // Check if is a unused entry
+    pub fn unused(&self) -> Option<bool> {
+        if self.unused_not_last().is_some() || self.last_and_unused().is_some() {
+            if self.unused_not_last().unwrap() || self.last_and_unused().unwrap() {
+                Some(true)
+            } else {
+                Some(false)
+            }
+        } else {
+            None
+        }
+    }
+    // Check if is a unused and not last entry, like a gap
+    pub fn unused_not_last(&self) -> Option<bool> {
+        if self.lde.is_some() {
+            if self.lde.unwrap().ord == DIR_ENTRY_UNUSED {
+                Some(true)
+            } else {
+                Some(false)
+            }
+        } else {
+            None
+        }
+    }
+    // Check if is a unused and last entry, marks the end of the directory file
+    pub fn last_and_unused(&self) -> Option<bool> {
+        if self.lde.is_some() {
+            if self.lde.unwrap().ord == DIR_ENTRY_LAST_AND_UNUSED {
+                Some(true)
+            } else {
+                Some(false)
+            }
+        } else {
+            None
+        }
+    }
+}
+
+impl Debug for Entry {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if self.is_lfn() {
+            f.debug_struct("DirEntry")
+                .field("item_type", &self.item_type)
+                .field("lde(LongDirEntry)", &self.lde.as_ref().unwrap().name())
+                .field("lde(LongDirEntry)", &self.lde.as_ref().unwrap().name())
+                .finish()
+        } else {
+            f.debug_struct("DirEntry")
+                .field("item_type", &self.item_type)
+                .field("sde(ShortDirEntry)", &self.sde.as_ref().unwrap().name())
+                .finish()
+        }
     }
 }
