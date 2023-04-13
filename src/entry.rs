@@ -234,9 +234,7 @@ pub enum FATAttr {
 
 /// FAT 32 Byte Directory Entry Structure
 ///
-/// TODO: Realize Time and Date
-//
-// 8 + 3 + 1 + 1 + 1 + 1 + 2 + 2 + 2 + 4 + 4 = 32 bytes
+// 9 + 3 + 1 + 1 + 1 + 1 + 2 + 2 + 2 + 4 + 4 = 32 bytes
 #[derive(Clone, Copy, Debug)]
 #[repr(packed)]
 pub struct ShortDirEntry {
@@ -271,25 +269,25 @@ pub struct ShortDirEntry {
     /// inclusive.
     ///
     /// size: 1 byte      offset: 13 Bytes (0xD)    value range: 0-199
-    //
-    //  文件创建的时间: 时-分-秒，16bit 被划分为 3个部分:
-    //    0~4bit 为秒, 以 2秒为单位，有效值为 0~29，可以表示的时刻为 0~58
-    //    5~10bit 为分, 有效值为 0~59
-    //    11~15bit 为时, 有效值为 0~23
     crt_time_tenth: u8,
     /// Time file was created
     /// The granularity of the seconds part of DIR_CrtTime is 2 seconds.
     ///
     /// size: 2 bytes     offset: 14 Bytes (0xE ~ 0xF)
     //
-    //  文件创建日期, 16bit 也划分为三个部分:
-    //    0~4bit 为日, 有效值为 1~31
-    //    5~8bit 为月, 有效值为 1~12
-    //    9~15bit 为年, 有效值为 0~127，这是一个相对于 1980 年的年数值 (该值加上 1980 即为文件创建的日期值 (1980–2107))
+    //  文件创建的时间: 时-分-秒，16bit 被划分为 3个部分:
+    //    0~4bit 为秒, 以 2秒为单位，有效值为 0~29，可以表示的时刻为 0~58
+    //    5~10bit 为分, 有效值为 0~59
+    //    11~15bit 为时, 有效值为 0~23
     crt_time: u16,
     /// Date file was created
     ///
     /// size: 2 bytes     offset: 16 Bytes (0x10~0x11)
+    //
+    //  文件创建日期, 16bit 也划分为三个部分:
+    //    0~4bit 为日, 有效值为 1~31
+    //    5~8bit 为月, 有效值为 1~12
+    //    9~15bit 为年, 有效值为 0~127，这是一个相对于 1980 年的年数值 (该值加上 1980 即为文件创建的日期值 (1980–2107))
     crt_date: u16,
     /// Last access date
     /// Note that there is no last access time, only a
@@ -329,13 +327,24 @@ pub struct ShortDirEntry {
     file_size: u32,
 }
 
+impl Default for ShortDirEntry {
+    fn default() -> Self {
+        Self::empty()
+    }
+}
+
 impl ShortDirEntry {
+    // All names must check if they have existed in the directory
     pub fn new(cluster: u32, name: &[u8], extension: &[u8], create_type: OpType) -> Self {
         let mut item = Self::empty();
         let mut name_: [u8; 8] = [0x20; 8];
         let mut extension_: [u8; 3] = [0x20; 3];
         name_[0..name.len()].copy_from_slice(name);
         extension_[0..extension.len()].copy_from_slice(extension);
+
+        name_[..].make_ascii_uppercase();
+        extension_[..].make_ascii_uppercase();
+
         item.name = name_;
         item.extension = extension_;
         match create_type {
@@ -346,6 +355,7 @@ impl ShortDirEntry {
         item
     }
 
+    // All names must check if they have existed in the directory
     pub fn new_form_name_str(cluster: u32, name_str: &str, create_type: OpType) -> Self {
         let (name, extension) = match name_str.find('.') {
             Some(i) => (&name_str[0..i], &name_str[i + 1..]),
@@ -366,8 +376,8 @@ impl ShortDirEntry {
         //
         // "Short names passed to the file system are always converted to upper case and their original case value is lost"
         //
-        // item[0x00..0x00 + name.len()].make_ascii_uppercase();
-        // item[0x08..0x08 + extension.len()].make_ascii_uppercase();
+        item[0x00..0x00 + name.len()].make_ascii_uppercase();
+        item[0x08..0x08 + extension.len()].make_ascii_uppercase();
 
         // Q: 采用小端还是大端序存储数据?
         // A: 采用小端序存储数据, 与 FAT32 文件系统的存储方式一致
@@ -390,9 +400,12 @@ impl ShortDirEntry {
         unsafe { *(item.as_ptr() as *const ShortDirEntry) }
     }
 
+    // All names must check if they have existed in the directory
     pub fn new_from_name_bytes(cluster: u32, name_bytes: &[u8], create_type: OpType) -> Self {
         let mut item = [0; 32];
         item[0x00..0x0B].copy_from_slice(name_bytes);
+
+        item[0x00..0x00 + name_bytes.len()].make_ascii_uppercase();
 
         let mut cluster: [u8; 4] = cluster.to_be_bytes();
         cluster.reverse();
@@ -408,16 +421,19 @@ impl ShortDirEntry {
         unsafe { *(item.as_ptr() as *const ShortDirEntry) }
     }
 
+    // All names must check if they have existed in the directory
     pub fn set_name(&mut self, name: &[u8], extension: &[u8]) {
         let mut name_: [u8; 8] = [0x20; 8];
+        name_[0..name.len()].make_ascii_uppercase();
         name_[0..name.len()].copy_from_slice(name);
 
         let mut extension_: [u8; 3] = [0x20; 3];
+        extension_[0..extension.len()].make_ascii_uppercase();
         extension_[0..extension.len()].copy_from_slice(extension);
         self.name = name_;
     }
 
-    pub fn check_sum(&self) -> u8 {
+    pub fn gen_check_sum(&self) -> u8 {
         let mut name_: [u8; 11] = [0u8; 11];
         let mut sum: u8 = 0;
         for i in 0..8 {
@@ -695,13 +711,35 @@ impl ShortDirEntry {
     }
 }
 
+impl ShortDirEntry {
+    pub fn set_create_time(&mut self, time: u16) {
+        self.crt_time = time;
+    }
+
+    pub fn set_create_date(&mut self, date: u16) {
+        self.crt_date = date;
+    }
+
+    pub fn set_last_access_date(&mut self, date: u16) {
+        self.lst_acc_date = date;
+    }
+
+    pub fn set_last_write_time(&mut self, time: u16) {
+        self.wrt_time = time;
+    }
+
+    pub fn set_last_write_date(&mut self, date: u16) {
+        self.wrt_date = date;
+    }
+}
+
 #[derive(Debug, Clone, Copy)]
 #[repr(packed)]
 /// Long Directory Entry
 ///
 /// 1 + 2*5 + 1 + 1 + 2 + 2*6 + 2 + 2*2 = 32 bytes
 //
-//  TODE: Name charactor check
+//  TODO: Name charactor check
 pub struct LongDirEntry {
     /// The order of this entry in the sequence of long dir entries.
     /// It is associated with the short dir entry at the end of the long dir set,
@@ -709,11 +747,20 @@ pub struct LongDirEntry {
     /// which indicates that the entry is the last long dir entry in a set of long dir entries.
     /// All valid sets of long dir entries must begin with an entry having this mask.
     ///
+    /// DO NOT misunderstand the meaning of the mask(0x40).
+    /// This mask should be for ord in the same file. The long
+    /// file name of a long directory entry only has 13 unicode
+    /// characters. When the file name exceeds 13 characters,
+    /// multiple long directory entries are required.
+    ///
     /// Long Dir Entry Order   size: 1 byte    offset: 0 (0x00)
     //
     //  长文件名目录项的序列号, 一个文件的第一个目录项序列号为 1, 然后依次递增. 如果是该文件的
     //  最后一个长文件名目录项, 则将该目录项的序号与 0x40 进行 "或 (OR) 运算"的结果写入该位置.
-    //  如果该长文件名目录项对应的文件或子目录被删除, 则将该字节设置成删除标志0xE5
+    //  如果该长文件名目录项对应的文件或子目录被删除, 则将该字节设置成删除标志0xE5.
+    //
+    //  Mask(0x40)针对同一个文件中的 ord, 一个长目录项的长文件名仅有 13 个 unicode字符,
+    //  当文件名超过13个字符时，需要多个长目录项
     ord: u8,
     /// Characters 1-5 of the long-name sub-component in this dir entry.
     /// CharSet: Unicode. Codeing: UTF-16LE
@@ -866,7 +913,7 @@ impl LongDirEntry {
     }
 
     pub fn delete(&mut self) {
-        self.ord = 0xE5;
+        self.ord = DIR_ENTRY_UNUSED;
     }
 
     fn write_unicode(value: &str, buf: &mut [u8]) {
@@ -952,12 +999,16 @@ impl LongDirEntry {
         (utf8, len)
     }
 
+    // The mask should be for ord in the same file. The long
+    // file name of a long directory entry only has 13 unicode
+    // characters. When the file name exceeds 13 characters,
+    // multiple long directory entries are required.
     fn lde_order(&self) -> usize {
         (self.ord & (LAST_LONG_ENTRY - 1)) as usize
     }
 
     fn is_lde_end(&self) -> bool {
-        (self.ord & 0x40) == 0x40
+        (self.ord & LAST_LONG_ENTRY) == LAST_LONG_ENTRY
     }
 
     fn as_bytes_array(&self) -> [u8; 32] {
@@ -1017,6 +1068,18 @@ impl EntryType {
 }
 
 #[derive(Default, Copy, Clone)]
+/// Why use Option<ShortDirEntry>?
+///
+/// We know that there is only one short directory entry, while for long directory entries,
+/// when the Unicode character length exceeds 13, multiple long directory entries are required
+/// to save the file name. Therefore, when designing the Entry here, it is believed that the
+/// directory item may be a long or a short directory entry, so Option<T> is used for both.
+///
+/// TODO
+///
+/// So, what we should deal with is that:
+/// - How to handle file names?
+/// - How to associate directory entries of the same file?
 pub struct Entry {
     pub(crate) item_type: EntryType,
     pub(crate) sde: Option<ShortDirEntry>,
@@ -1032,7 +1095,7 @@ impl Entry {
         self.sde.as_mut().unwrap().set_first_cluster(cluster);
     }
 
-    fn short_file_name_bytes_array(&self) -> Option<([u8; 12], usize)> {
+    fn sfn_bytes_array(&self) -> Option<([u8; 12], usize)> {
         if self.sde.is_some() {
             Some(self.sde.as_ref().unwrap().name_bytes_array_with_dot())
         } else {
@@ -1048,7 +1111,7 @@ impl Entry {
         }
     }
 
-    fn long_file_name_to_utf8_bytes_array(&self) -> Option<([u8; 13 * 3], usize)> {
+    fn lfn_to_utf8_bytes_array(&self) -> Option<([u8; 13 * 3], usize)> {
         if self.lde.is_some() {
             Some(self.lde.as_ref().unwrap().name_to_utf8())
         } else {
@@ -1088,16 +1151,21 @@ impl Entry {
         }
     }
 
-    // TODO: Check or Change or not
-    pub(crate) fn to_bytes_array(&self) -> [u8; 32] {
-        if self.sde.is_some() {
-            self.sde.as_ref().unwrap().to_bytes_array()
-        } else {
-            self.lde.as_ref().unwrap().to_bytes_array()
-        }
+    pub(crate) fn to_bytes_array(&self) -> (Option<[u8; 32]>, Option<[u8; 32]>) {
+        let mut sde_bytes: Option<[u8; 32]> = self.sde.map(|sde| sde.to_bytes_array());
+        let mut lde_bytes: Option<[u8; 32]> = self.lde.map(|lde| lde.to_bytes_array());
+        (sde_bytes, lde_bytes)
     }
 
-    pub(crate) fn new_lde(order: u8, check_sum: u8, name: &str) -> Self {
+    pub(crate) fn sde_to_bytes_array(&self) -> Option<[u8; 32]> {
+        self.sde.map(|sde| sde.to_bytes_array())
+    }
+
+    pub(crate) fn lde_to_bytes_array(&self) -> Option<[u8; 32]> {
+        self.lde.map(|lde| lde.to_bytes_array())
+    }
+
+    pub(crate) fn new_lfn_str(order: u8, check_sum: u8, name: &str) -> Self {
         Self {
             item_type: EntryType::LFN,
             sde: None,
@@ -1105,7 +1173,7 @@ impl Entry {
         }
     }
 
-    pub(crate) fn new_sde_from_name_str(cluster: u32, name: &str, create_type: OpType) -> Self {
+    pub(crate) fn new_sfn_str(cluster: u32, name: &str, create_type: OpType) -> Self {
         Self {
             item_type: EntryType::from_create(create_type),
             sde: Some(ShortDirEntry::new_form_name_str(cluster, name, create_type)),
@@ -1113,7 +1181,7 @@ impl Entry {
         }
     }
 
-    pub(crate) fn new_sde_from_name_bytes(cluster: u32, name: &[u8], create_type: OpType) -> Self {
+    pub(crate) fn new_sfn_bytes(cluster: u32, name: &[u8], create_type: OpType) -> Self {
         Self {
             item_type: EntryType::from_create(create_type),
             sde: Some(ShortDirEntry::new_from_name_bytes(
@@ -1153,11 +1221,11 @@ impl Entry {
         }
     }
 
-    pub(crate) fn sde_equal(&self, name: &str) -> bool {
+    pub(crate) fn sfn_equal(&self, name: &str) -> bool {
         if self.is_deleted() {
             return false;
         }
-        let option = self.short_file_name_bytes_array();
+        let option = self.sfn_bytes_array();
         if option.is_none() {
             return false;
         }
@@ -1169,11 +1237,11 @@ impl Entry {
         }
     }
 
-    pub(crate) fn lde_equal(&self, name: &str) -> bool {
+    pub(crate) fn lfn_equal(&self, name: &str) -> bool {
         if self.is_deleted() {
             return false;
         }
-        let option = self.long_file_name_to_utf8_bytes_array();
+        let option = self.lfn_to_utf8_bytes_array();
         if option.is_none() {
             return false;
         }
@@ -1209,7 +1277,7 @@ impl Entry {
         if self.lde.is_some() {
             Some(self.lde.as_ref().unwrap().check_sum())
         } else if self.sde.is_some() {
-            Some(self.sde.as_ref().unwrap().check_sum())
+            Some(self.sde.as_ref().unwrap().gen_check_sum())
         } else {
             None
         }
@@ -1217,109 +1285,46 @@ impl Entry {
 }
 
 impl Entry {
-    /// Test whether `self` is a short entry
-    /// and whether the short entry name of `self` is the same type of `prefix`.
-    pub fn gen_short_name_numtail(v: Vec<Entry>, name_res: &mut [u8; 11]) {
-        if v.iter()
-            .find(|i| i.sde.unwrap().name_bytes_array()[..] == name_res[..])
-            .is_none()
-        {
-            return;
-        }
-        let mut baselen: usize = name_res
-            .iter()
-            .enumerate()
-            .find(|i| *i.1 == ' ' as u8)
-            .map_or_else(|| 8, |i| i.0);
-        let numtail2_baselen = 2;
-        let numtail_baselen = 6;
-        // 如果基本文件名超过6位(7或者8),则其文件名
-        if baselen > 6 {
-            //这时候优先用最后两位
-            baselen = numtail_baselen;
-            name_res[7] = ' ' as u8;
-        }
-        // 将文件基本名长度处替换为~,尝试单个数字
-        name_res[baselen] = '~' as u8;
-        for i in 1..10 {
-            name_res[baselen + 1] = i + '0' as u8;
-            // 如果单个数字能确保找不到,则用单个数字
-            if v.iter()
-                .find(|i| i.sde.unwrap().name_bytes_array() == name_res[..])
-                .is_none()
-            {
-                return;
-            }
-        }
-        //好吧,如果到这里就是都找到了
-        //然后开始伪随机
-        let token = 19382022; //随便选的数字
-        let mut i = token & 0xffff;
-        let sz = ((token >> 10) & 0x7) as u8;
-        if baselen > 2 {
-            //如果基本名长度超过2则使用6位数字
-            baselen = numtail2_baselen;
-            name_res[7] = ' ' as u8;
-        }
-
-        name_res[baselen + 4] = '~' as u8;
-        name_res[baselen + 5] = '1' as u8 + sz;
-        loop {
-            name_res[baselen..baselen + 4]
-                .copy_from_slice(&(format!("{:04X}", i).as_bytes())[0..4]);
-            if v.iter()
-                .find(|i| i.sde.unwrap().name_bytes_array()[..] == name_res[..])
-                .is_none()
-            {
-                break;
-            }
-            i -= 11;
-        }
+    pub fn gen_short_name_numtail() {
+        todo!()
     }
     /// Embedded spaces within a long name are allowed.
     /// Leading and trailing spaces in a long name are ignored.
     /// Leading and embedded periods are allowed in a name and are stored in the long name.
     /// Trailing periods are ignored.
     /// No '~' or trailing numbers
-    pub fn gen_short_name_prefix(mut s: String) -> String {
-        s.replace(" ", "");
-        s.make_ascii_uppercase();
-        let split_res = s.rsplit_once('.');
-        let (base, ext) = if split_res.is_some() {
-            split_res.unwrap()
-        } else {
-            (&s[..], "")
-        };
-        let (base, ext) = if base.len() == 0 && ext.len() != 0 {
-            (ext, base)
-        } else {
-            (base, ext)
-        };
-        let base = {
-            let mut i = 0;
-            while i != base.len() && base[i..].starts_with('.') {
-                i += 1;
-            }
-            if i == base.len() {
-                base
-            } else {
-                &base[i..]
-            }
-        };
-        // not sure if this should be a `trim_matches` or a `trim_start_matches`
-        let base = base.trim_start_matches('.');
+    pub fn gen_short_name_prefix() {
+        todo!()
+    }
 
-        let base = if ext.len() != 0 || base.len() != 0 {
-            format!("{: <8}", base.split_at(8.min(base.len())).0)
-        } else {
-            "".to_string()
-        };
-        let ext = if ext.len() != 0 || base.len() != 0 {
-            format!("{: <3}", ext.split_at(3.min(ext.len())).0)
-        } else {
-            "".to_string()
-        };
-        [base, ext].concat()
+    pub fn set_sde_create_time(&mut self, time: u16) {
+        if self.sde.is_some() {
+            self.sde.as_mut().unwrap().set_create_time(time);
+        }
+    }
+
+    pub fn set_sde_create_date(&mut self, date: u16) {
+        if self.sde.is_some() {
+            self.sde.as_mut().unwrap().set_create_date(date);
+        }
+    }
+
+    pub fn set_sde_last_access_date(&mut self, date: u16) {
+        if self.sde.is_some() {
+            self.sde.as_mut().unwrap().set_last_access_date(date);
+        }
+    }
+
+    pub fn set_sde_last_write_time(&mut self, time: u16) {
+        if self.sde.is_some() {
+            self.sde.as_mut().unwrap().set_last_write_time(time);
+        }
+    }
+
+    pub fn set_sde_last_write_date(&mut self, date: u16) {
+        if self.sde.is_some() {
+            self.sde.as_mut().unwrap().set_last_write_date(date);
+        }
     }
 
     pub fn empty() -> Self {
@@ -1413,7 +1418,7 @@ impl Debug for Entry {
         if self.is_lfn() {
             f.debug_struct("DirEntry")
                 .field("item_type", &self.item_type)
-                .field("lde(LongDirEntry)", &self.lde.as_ref().unwrap().name())
+                .field("sde(ShortDirEntry)", &self.sde.as_ref().unwrap().name())
                 .field("lde(LongDirEntry)", &self.lde.as_ref().unwrap().name())
                 .finish()
         } else {
@@ -1423,4 +1428,9 @@ impl Debug for Entry {
                 .finish()
         }
     }
+}
+
+pub(crate) enum NameType {
+    SFN,
+    LFN,
 }

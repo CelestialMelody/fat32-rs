@@ -155,6 +155,14 @@
 //!
 //!
 //! Assume that the type WORD is a 16-bit unsigned and that the type DWORD is a 32-bit unsigned.
+//!
+//! Given any valid cluster number N, where in the FAT(s) is the entry for that cluster number?
+//!
+//! FATOffset = N * 4;
+//! ThisFATSecNum = BPB_ResvdSecCnt + (FATOffset / BPB_BytsPerSec);
+//! ThisFATEntOffset = REM(FATOffset / BPB_BytsPerSec);
+//!
+//! See [`FAT<T>`::write()`]
 
 // 布局如下:
 //      引导扇区 - 保留扇区 - FAT1 - FAT2 - 数据区
