@@ -55,115 +55,77 @@ pub struct ReadIter<'a> {
 
 impl<'a> File<'a> {
     /// 将文件内容从 offset 字节开始的部分读到内存中的缓冲区 buf 中, 并返回实际读到的字节数
-    ///
-    /// 如果文件剩下的内容还足够多, 那么缓冲区会被填满;否则文件剩下的全部内容都会被读到缓冲区中
     pub fn read_at(&self, buf: &mut [u8], offset: usize) -> Result<usize, FileError> {
         let spc = self.bpb.sector_per_cluster_usize();
         let cluster_size = spc * BLOCK_SIZE;
 
         // 1. 确定范围 [start, end) 中间的那些块需要被读取
-        // start: 从 offset 开始读取内容
         let mut file_start_pointer = offset;
         // min(): 如果文件剩下的内容还足够多, 那么缓冲区会被填满; 否则文件剩下的全部内容都会被读到缓冲区中
-        let end = (file_start_pointer + buf.len()).min(self.sde.file_size().unwrap());
-        if file_start_pointer >= end {
+        let file_end_bound = (file_start_pointer + buf.len()).min(self.sde.file_size().unwrap());
+        if file_start_pointer >= file_end_bound {
             // 如果 start >= end, 则说明 offset 已经超过了文件的大小, 无法读取
             return Err(FileError::ReadOutOfBound);
         }
 
         // 2. 确定起始簇号, 以及簇内块号以及块号
-        // start_block_in_file: 目前是文件内部第多少个数据块
-        let blk_id_in_file = file_start_pointer / BLOCK_SIZE as usize;
-        // fat: 当前簇的 fat 表项
+        // block_id_in_file: 目前是文件内部第多少个数据块
+        let block_id_in_file = file_start_pointer / BLOCK_SIZE as usize;
         let mut fat = self.fat.clone();
         // pre_cluster_count: offset 之前的簇号
-        let pre_cluster_count = blk_id_in_file / spc;
+        let pre_cluster_count = block_id_in_file / spc;
+        // start_block_byte_in_file: 以 byte 为单位, 文件内部块的起始位置
+        let mut start_block_byte_in_file = 0;
         for _ in 0..pre_cluster_count {
+            start_block_byte_in_file += cluster_size;
             fat = fat.next().unwrap();
         }
 
-        // read the first cluster
-        // 第一个块的偏移额外进行处理, 虽然 end_block_id_in_cluster 可能不一定为 spc
-        // 但是仍然可以通过当 start = end 时, 即读完成时退出
-        // TODO 优化
-        // start_offset_in_disk: 当前簇在磁盘中的偏移量
-        let start_offset_in_disk = self.bpb.offset(fat.current_cluster as u32);
-        // start_block_id_in_disk: 当前块在磁盘中的块编号
-        let start_block_id_in_disk = start_offset_in_disk / BLOCK_SIZE + blk_id_in_file % spc;
-        let end_block_id_in_disk = start_offset_in_disk / BLOCK_SIZE + spc; // 相当于 end_block_id_in_cluster = (spc) sector_pre_cluster
         let mut read_size = 0;
+        // 3. 读取数据
+        while file_start_pointer < file_end_bound {
+            // cluster offset byte in disk
+            let cluster_offset_in_disk = self.bpb.offset(fat.current_cluster as u32);
+            // block id range of the current cluster
+            let start_block_id_in_disk = cluster_offset_in_disk / BLOCK_SIZE;
+            let end_block_id_in_disk = cluster_offset_in_disk / BLOCK_SIZE + spc;
 
-        for (block_id_in_cluster, block_id) in
-            (start_block_id_in_disk..end_block_id_in_disk).enumerate()
-        {
-            // calculate block start byte. block_byte_start is diviable by BLOCK_SIZE.
-            if file_start_pointer < end {
-                let option = get_block_cache(block_id, Arc::clone(&self.device));
-                if option.is_some() {
-                    let cache = option.unwrap();
-                    let offset = file_start_pointer % BLOCK_SIZE;
-                    let len = (BLOCK_SIZE - offset).min(end - file_start_pointer);
-                    cache.read().read(0, |cache: &[u8; BLOCK_SIZE]| {
-                        buf[read_size..read_size + len]
-                            .copy_from_slice(&cache[offset..offset + len]);
-                    });
-                    read_size += len;
-                    file_start_pointer += len;
-                } else {
-                    // cache 无法获取: lru_cache 暂时没法释放一个 cache, 此时直接从磁盘读取第一个簇中剩余的数据(可能不足一个簇)
-                    let len = (cluster_size - file_start_pointer % cluster_size)
-                        .min(end - file_start_pointer);
-                    let offset_in_block = file_start_pointer % BLOCK_SIZE;
-
-                    let mut cluster_buffer = Vec::<u8>::with_capacity(cluster_size);
-                    self.device
-                        .read_blocks(cluster_buffer.as_mut_slice(), start_offset_in_disk, spc)
-                        .unwrap();
-                    let offset_in_cluster = block_id_in_cluster * BLOCK_SIZE + offset_in_block;
-                    buf[read_size..read_size + len].copy_from_slice(
-                        &cluster_buffer[offset_in_cluster..offset_in_cluster + len],
-                    );
-                    file_start_pointer += len;
-                    read_size += len;
-                    break;
-                }
-            }
-            if file_start_pointer >= end {
-                return Ok(read_size);
-            }
-        }
-        fat = fat.next().unwrap();
-
-        // read entil reach end
-        // 不需要上面代码中的 offset 处理偏移, 对齐了
-        // TODO 优化: 合并
-        while file_start_pointer < end {
-            let start_offset_in_disk = self.bpb.offset(fat.current_cluster as u32);
-            let start_block_id_in_disk = start_offset_in_disk / BLOCK_SIZE;
-            let end_block_id_in_disk = start_offset_in_disk / BLOCK_SIZE + spc;
             for (block_id_in_cluster, block_id) in
                 (start_block_id_in_disk..end_block_id_in_disk).enumerate()
             {
-                // calculate block start byte. block_byte_start is diviable by BLOCK_SIZE;
-                if file_start_pointer < end {
+                // file start pointer in block byte range
+                if file_start_pointer >= start_block_byte_in_file
+                    && file_start_pointer < start_block_byte_in_file + BLOCK_SIZE
+                    && file_start_pointer < file_end_bound
+                {
                     let option = get_block_cache(block_id, Arc::clone(&self.device));
+
                     if option.is_some() {
                         let cache = option.unwrap();
-                        let len = BLOCK_SIZE.min(end - file_start_pointer);
+                        // distance of file start pointer from the start of the block
+                        let offset_in_block = file_start_pointer - start_block_byte_in_file;
+                        let len =
+                            (BLOCK_SIZE - offset_in_block).min(file_end_bound - file_start_pointer);
                         cache.read().read(0, |cache: &[u8; BLOCK_SIZE]| {
-                            buf[read_size..read_size + len].copy_from_slice(&cache[0..len]);
+                            buf[read_size..read_size + len]
+                                .copy_from_slice(&cache[offset_in_block..offset_in_block + len]);
                         });
                         file_start_pointer += len;
                         read_size += len;
                     } else {
-                        // cache 无法获取: lru_cache 暂时没法释放一个 cache, 此时直接从磁盘读取第一个簇中剩余的数据(可能不足一个簇)
-                        let len = (cluster_size - file_start_pointer % cluster_size)
-                            .min(end - file_start_pointer);
-                        let offset_in_block = file_start_pointer % BLOCK_SIZE;
+                        // cache 无法获取: lru_cache 暂时没法释放一个 cache, 此时直接从磁盘读取
+                        let offset_in_block = file_start_pointer - start_block_byte_in_file;
+                        let len = (BLOCK_SIZE * (spc - block_id_in_cluster) - offset_in_block)
+                            .min(file_end_bound - file_start_pointer);
 
+                        // TODO perf: add cluster cache for BlockCache
                         let mut cluster_buffer = Vec::<u8>::with_capacity(cluster_size);
                         self.device
-                            .read_blocks(cluster_buffer.as_mut_slice(), start_offset_in_disk, spc)
+                            .read_blocks(
+                                cluster_buffer.as_mut_slice(),
+                                start_block_id_in_disk * BLOCK_SIZE,
+                                spc,
+                            )
                             .unwrap();
                         let offset_in_cluster = block_id_in_cluster * BLOCK_SIZE + offset_in_block;
                         buf[read_size..read_size + len].copy_from_slice(
@@ -174,10 +136,13 @@ impl<'a> File<'a> {
                         break;
                     }
                 }
-                if file_start_pointer >= end {
-                    // return Ok(read_byte_cnt);
+
+                if file_start_pointer >= file_end_bound {
+                    // return Ok(read_size);
                     break;
                 }
+
+                start_block_byte_in_file += BLOCK_SIZE;
             }
 
             fat = fat.next().unwrap();
