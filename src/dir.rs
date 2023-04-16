@@ -2,9 +2,8 @@ use crate::block_device::BlockDevice;
 use crate::bpb::BIOSParameterBlock;
 use crate::entry::Entry;
 use crate::entry::NameType;
-use crate::fat::FAT;
+use crate::fat::ClusterChain;
 use crate::file::File;
-use crate::BlockDeviceError;
 
 use crate::BLOCK_SIZE;
 
@@ -32,10 +31,10 @@ pub enum OpType {
 
 #[derive(Clone)]
 pub struct Dir<'a> {
-    pub(crate) device: Arc<dyn BlockDevice<Error = BlockDeviceError>>,
+    pub(crate) device: Arc<dyn BlockDevice>,
     pub(crate) bpb: &'a BIOSParameterBlock,
     pub(crate) detail: Entry,
-    pub(crate) fat: FAT,
+    pub(crate) fat: ClusterChain,
 }
 
 impl<'a> Dir<'a> {
@@ -68,7 +67,7 @@ impl<'a> Dir<'a> {
             None => Err(DirError::NoMatchFile),
             Some(di) => {
                 if di.is_file() {
-                    let fat = FAT::new(
+                    let fat = ClusterChain::new(
                         di.first_cluster(),
                         Arc::clone(&self.device),
                         self.bpb.fat1(),
@@ -77,7 +76,7 @@ impl<'a> Dir<'a> {
                         device: Arc::clone(&self.device),
                         bpb: self.bpb,
                         dir_cluster: self.detail.first_cluster(),
-                        detail: di,
+                        sde: di,
                         fat,
                     })
                 } else {
@@ -96,7 +95,7 @@ impl<'a> Dir<'a> {
             None => Err(DirError::NoMatchDir),
             Some(di) => {
                 if di.is_dir() {
-                    let fat = FAT::new(
+                    let fat = ClusterChain::new(
                         di.first_cluster(),
                         Arc::clone(&self.device),
                         self.bpb.fat1(),
@@ -268,7 +267,7 @@ impl<'a> Dir<'a> {
     /// Delete ALL File And Dir Which Included Deleted Dir
     fn delete_in_dir(&self, cluster: u32) {
         let fat_offset = self.bpb.fat1();
-        let fat = FAT::new(cluster, Arc::clone(&self.device), fat_offset);
+        let fat = ClusterChain::new(cluster, Arc::clone(&self.device), fat_offset);
         let mut iter = DirIter::new(Arc::clone(&self.device), fat, self.bpb);
         loop {
             if let Some(d) = iter.next() {
@@ -309,7 +308,9 @@ impl<'a> Dir<'a> {
         let spc = self.bpb.sector_per_cluster_usize();
         for i in 0..spc {
             let offset = self.bpb.offset(cluster) + i * BLOCK_SIZE;
-            self.device.write(&[0; BLOCK_SIZE], offset, 1).unwrap();
+            self.device
+                .write_blocks(&[0; BLOCK_SIZE], offset, 1)
+                .unwrap();
         }
     }
 
@@ -326,15 +327,15 @@ impl<'a> Dir<'a> {
         buffer[32..64].copy_from_slice(&di.sde_to_bytes_array().unwrap());
 
         let offset = self.bpb.offset(cluster);
-        self.device.write(&buffer, offset, 1).unwrap();
+        self.device.write_blocks(&buffer, offset, 1).unwrap();
     }
 }
 
 /// To Iterate Dir
 #[derive(Clone)]
 pub struct DirIter<'a> {
-    device: Arc<dyn BlockDevice<Error = BlockDeviceError>>,
-    fat: FAT,
+    device: Arc<dyn BlockDevice>,
+    fat: ClusterChain,
     bpb: &'a BIOSParameterBlock,
     offset: usize,
     sector_offset: usize,
@@ -344,8 +345,8 @@ pub struct DirIter<'a> {
 
 impl<'a> DirIter<'a> {
     pub(crate) fn new(
-        device: Arc<dyn BlockDevice<Error = BlockDeviceError>>,
-        fat: FAT,
+        device: Arc<dyn BlockDevice>,
+        fat: ClusterChain,
         bpb: &BIOSParameterBlock,
     ) -> DirIter {
         let mut fat = fat;
@@ -446,12 +447,14 @@ impl<'a> DirIter<'a> {
 
     pub(crate) fn update_buffer(&mut self) {
         let offset = self.offset_value();
-        self.device.read(&mut self.buffer, offset, 1).unwrap();
+        self.device
+            .read_blocks(&mut self.buffer, offset, 1)
+            .unwrap();
     }
 
     pub(crate) fn update(&self) {
         self.device
-            .write(&self.buffer, self.offset_value(), 1)
+            .write_blocks(&self.buffer, self.offset_value(), 1)
             .unwrap();
     }
 
@@ -459,7 +462,9 @@ impl<'a> DirIter<'a> {
         let spc = self.bpb.sector_per_cluster_usize();
         for i in 0..spc {
             let offset = self.bpb.offset(cluster) + i * BLOCK_SIZE;
-            self.device.write(&[0; BLOCK_SIZE], offset, 1).unwrap();
+            self.device
+                .write_blocks(&[0; BLOCK_SIZE], offset, 1)
+                .unwrap();
         }
     }
 }
