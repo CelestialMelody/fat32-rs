@@ -28,6 +28,10 @@
 //! The maximum valid cluster number for the volume is CountofClusters + 1, and the "count of clusters
 //! including the two reserved clusters" is CountofClusters + 2.
 //!
+//! Given any valid data cluster number N, the sector number of the first sector of that cluster (again
+//! relative to sector 0 of the FAT volume) is computed as follows:
+//!     FirstSectorofCluster = ((N – 2) * BPB_SecPerClus) + FirstDataSector
+//!
 //! We intend to realize fat32, so we don't need to care about fat12 and fat16.
 //! But we still reserve the fields of fat12 and fat16 for future maybe. See the [`BPB12_16`] and [`FatType`].
 //!
@@ -42,7 +46,7 @@
 //! starting at that sector number on the volume—6—there is a backup copy of the boot sector
 //! information including the volume’s BPB.
 
-//！FAT File System Layout:
+//! FAT File System Layout:
 //!      Boot Sector - Reserved Sectors - FAT1 - FAT2 - (FAT32 without Root Directory Region) - Data Region
 //! Note:
 //!     1. Reserved Sectors include the Boot Sector, Boot Sector include the BPB and the FSInfo(structure)
@@ -170,8 +174,6 @@
 // 2. FAT1 起始地址 = 保留扇区数 * 扇区大小
 // 3. 文件分配表区共保存了两个相同的文件分配表, 因为文件所占用的存储空间 (簇链) 及空闲空间的管理都是通过FAT实现的, 保存两个以便第一个损坏时, 还有第二个可用
 
-#![allow(unused)]
-
 use crate::{
     LEAD_SIGNATURE, MAX_CLUSTER_FAT12, MAX_CLUSTER_FAT16, STRUCT_SIGNATURE, TRAIL_SIGNATURE,
 };
@@ -183,7 +185,7 @@ use crate::{
 // 使用 #[repr(packed)] 属性可能会导致访问未对齐的内存，这可能会导致不可预测的结果，例如内存访问异常、程序崩溃等
 #[repr(packed)]
 pub struct BIOSParameterBlock {
-    pub(crate) bpb: BPB,
+    pub(crate) bpb: BasicBPB,
     pub(crate) bpb32: BPB32,
 }
 
@@ -206,6 +208,8 @@ impl BIOSParameterBlock {
             + (self.bpb.num_fats as usize) * (self.bpb32.fat_sz32 as usize)
             + (cluster as usize - 2) * (self.bpb.sec_per_clus as usize))
             * (self.bpb.byts_per_sec as usize)
+        // (self.first_data_sector() + (cluster as usize - 2) * (self.bpb.sec_per_clus as usize))
+        //     * (self.bpb.byts_per_sec as usize)
     }
 
     #[inline(always)]
@@ -331,7 +335,7 @@ impl BIOSParameterBlock {
 #[derive(Debug, Clone, Copy)]
 #[repr(packed)]
 /// Boot Sector and BPB Structure For FAT12/16/32
-pub struct BPB {
+pub struct BasicBPB {
     //  0x00~0x02 3个字节: 跳转指令与空值指令.
     //
     /// x86 assembly to jump instruction to boot code.
@@ -451,7 +455,7 @@ pub struct BPB {
     pub(crate) tot_sec32: u32,
 }
 
-impl BPB {
+impl BasicBPB {
     pub(crate) fn bytes_per_sector(&self) -> u32 {
         self.byts_per_sec as u32
     }

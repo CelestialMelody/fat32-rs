@@ -188,7 +188,6 @@
 
 //! FAT Long Directory Entries
 //!
-#![allow(unused)]
 
 use crate::dir::OpType;
 use crate::{
@@ -197,13 +196,9 @@ use crate::{
     LONG_DIR_ENT_NAME_CAPACITY,
 };
 
-use alloc::{
-    format,
-    string::{String, ToString},
-    vec::Vec,
-};
+use alloc::string::{String, ToString};
 use core::fmt::Debug;
-use core::{convert, fmt, mem, str};
+use core::{fmt, str};
 
 #[derive(PartialEq, Debug, Clone, Copy)]
 #[repr(u8)]
@@ -578,7 +573,7 @@ impl ShortDirEntry {
             return self.name[0] == 0x05;
         } else {
             for i in 0..8 {
-                if (i < 3) {
+                if i < 3 {
                     if self.extension[i] < 0x20 {
                         return false;
                     }
@@ -801,6 +796,7 @@ pub struct LongDirEntry {
     /// Long Dir Entry First Cluster Low   size: 2 bytes   offset: 26 (Ox1A~0x1B)     value: 0
     //
     //  文件名的第 6~11 个字符, 未使用的字节用 0xFF 填充
+    // TODO 注释
     fst_clus_lo: u16,
     /// Characters 12-13 of the long-name sub-component in this dir entry.
     /// CharSet: Unicode. Codeing: UTF-16LE
@@ -955,7 +951,7 @@ impl LongDirEntry {
         let (mut utf8, mut len) = ([0; 13 * 3], 0);
 
         let mut op = |parts: &[u16]| {
-            for i in (0..parts.len()) {
+            for i in 0..parts.len() {
                 let unicode: u16 = parts[i];
                 if unicode == 0 || unicode == 0xFFFF {
                     break;
