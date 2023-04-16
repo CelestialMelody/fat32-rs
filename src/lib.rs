@@ -12,7 +12,6 @@ use crate::entry::NameType;
 use crate::fat::FatError;
 use crate::file::FileError;
 
-use alloc::string::String;
 use core::convert::TryInto;
 use core::str;
 
@@ -25,10 +24,8 @@ pub const TRAIL_SIGNATURE: u32 = 0xAA550000;
 pub const FREE_CLUSTER: u32 = 0x00000000;
 pub const END_CLUSTER: u32 = 0x0FFFFFF8;
 pub const BAD_CLUSTER: u32 = 0x0FFFFFF7;
-pub const END_INVALID_CLUSTER: u32 = 0x0FFFFFFF;
-
-/// End of Cluster Chain
-pub const EOC: u32 = 0x0FFFFFFF;
+/// EOC: End of Cluster Chain
+pub const END_OF_CLUSTER: u32 = 0x0FFFFFFF;
 
 pub const ATTR_READ_ONLY: u8 = 0x01;
 pub const ATTR_HIDDEN: u8 = 0x02;
@@ -40,6 +37,9 @@ pub const ATTR_LONG_NAME: u8 = ATTR_READ_ONLY | ATTR_HIDDEN | ATTR_SYSTEM | ATTR
 
 pub const DIRENT_SIZE: usize = 32;
 pub const LONG_NAME_LEN: u32 = 13;
+
+pub const BLOCK_CACHE_LIMIT: usize = 32;
+
 /// BPB Bytes Per Sector
 pub const BLOCK_SIZE: usize = 512;
 pub const CACHE_SIZE: usize = 512;
@@ -81,8 +81,10 @@ pub const MAX_CLUSTER_FAT32: usize = 268435445;
 pub const CLN_SHUT_BIT_MASK_FAT32: u32 = 0x08000000;
 pub const HRD_ERR_BIT_MASK_FAT32: u32 = 0x04000000;
 
+type Error = BlockDeviceError;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum BlockDeviceError {
+pub enum BlockDeviceError {
     Fat(FatError),
     Dir(DirError),
     File(FileError),
