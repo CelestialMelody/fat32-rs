@@ -4,7 +4,7 @@ use alloc::sync::Arc;
 // use core::num::NonZeroUsize;
 use lazy_static::*;
 use lru::LruCache;
-use spin::RwLock;
+use spin::{Mutex, RwLock};
 
 use crate::BLOCK_SIZE;
 
@@ -25,6 +25,9 @@ pub trait Cache {
     /// - `block_device`: The pointer to the block_device.
     fn sync(&mut self);
 }
+
+// TODO
+// 有没有更适合的设计
 pub struct BlockCache {
     cache: [u8; BLOCK_SIZE],
     // the block id in the disk not in the cluster
@@ -159,8 +162,8 @@ impl BlockCacheManager {
 
 // create a block cache manager with 64 blocks
 lazy_static! {
-    pub static ref BLOCK_CACHE_MANAGER: RwLock<BlockCacheManager> =
-        RwLock::new(BlockCacheManager::new());
+    pub static ref BLOCK_CACHE_MANAGER: Mutex<BlockCacheManager> =
+        Mutex::new(BlockCacheManager::new());
 }
 
 // used for external modules
@@ -172,10 +175,10 @@ pub fn get_block_cache(
     // 是否需要添加一个字段 物理起始块号 phy_blk_id = start_sec + block_id
     BLOCK_CACHE_MANAGER
         // TODO 区分 BLOCK_CACHE_MANAGER 的读写锁
-        .write()
+        .lock()
         .get_block_cache(block_id, block_device)
 }
 
 pub fn sync_all() {
-    BLOCK_CACHE_MANAGER.write().clear();
+    BLOCK_CACHE_MANAGER.lock().clear();
 }

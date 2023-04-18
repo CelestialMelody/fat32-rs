@@ -25,6 +25,11 @@ pub const FREE_CLUSTER: u32 = 0x00000000;
 pub const END_CLUSTER: u32 = 0x0FFFFFF8;
 pub const BAD_CLUSTER: u32 = 0x0FFFFFF7;
 /// EOC: End of Cluster Chain
+/// note that we still USE this cluster and this clsuter id is not EOC,
+/// but in FAT table, the value of this cluster is EOC
+//
+//  在创建新簇时将其在 FAT 表中的值设置为 EOC
+//  这样在 next() 中也判断是否为 EOC
 pub const END_OF_CLUSTER: u32 = 0x0FFFFFFF;
 
 pub const ATTR_READ_ONLY: u8 = 0x01;
@@ -38,7 +43,7 @@ pub const ATTR_LONG_NAME: u8 = ATTR_READ_ONLY | ATTR_HIDDEN | ATTR_SYSTEM | ATTR
 pub const DIRENT_SIZE: usize = 32;
 pub const LONG_NAME_LEN: u32 = 13;
 
-pub const BLOCK_CACHE_LIMIT: usize = 32;
+pub const BLOCK_CACHE_LIMIT: usize = 64;
 
 /// BPB Bytes Per Sector
 pub const BLOCK_SIZE: usize = 512;
