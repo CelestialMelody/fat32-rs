@@ -55,7 +55,6 @@ pub struct ReadIter<'a> {
 impl<'a> File<'a> {
     pub fn read_at_(&self, buf: &mut [u8], offset: usize) -> Result<usize, FileError> {
         let spc = self.bpb.sector_per_cluster_usize();
-        let cluster_size = spc * BLOCK_SIZE;
 
         // 1. 确定范围 [start, end) 中间的那些块需要被读取
         // min(): 如果文件剩下的内容还足够多, 那么缓冲区会被填满; 否则文件剩下的全部内容都会被读到缓冲区中
@@ -65,7 +64,7 @@ impl<'a> File<'a> {
             return Err(FileError::ReadOutOfBound);
         }
         let mut need_to_read_len = end - offset;
-        let cluster_cnt_to_read = self.num_cluster(need_to_read_len);
+        // let cluster_cnt_to_read = self.num_cluster(need_to_read_len);
 
         // 2. 确定起始簇号, 以及簇内块号以及块号
         // block_id_in_file: 目前是文件内部第多少个数据块
@@ -73,11 +72,8 @@ impl<'a> File<'a> {
         let mut fat = self.fat.clone();
         // pre_cluster_count: offset 之前的簇号
         let pre_cluster_count = block_id_in_file / spc;
-        // start_block_byte_in_file: 以 byte 为单位, 文件内部块的起始位置
-        let mut start_block_byte_in_file = 0;
         // 遍历到 offset 所在的簇
         for _ in 0..pre_cluster_count {
-            start_block_byte_in_file += cluster_size;
             fat = fat.next().unwrap();
         }
 
@@ -97,7 +93,7 @@ impl<'a> File<'a> {
             );
         }
 
-        assert_eq!(already_read, need_to_read_len);
+        assert!(already_read == end - offset);
         Ok(already_read)
     }
 
@@ -362,9 +358,9 @@ impl<'a> File<'a> {
             let start_block_id_in_disk = cluster_offset_in_disk / BLOCK_SIZE;
             let end_block_id_in_disk = cluster_offset_in_disk / BLOCK_SIZE + spc;
 
-            for (block_id_in_cluster, block_id) in
-                (start_block_id_in_disk..end_block_id_in_disk).enumerate()
-            {
+            // for (block_id_in_cluster, block_id) in
+            //     (start_block_id_in_disk..end_block_id_in_disk).enumerate()
+            for (_, block_id) in (start_block_id_in_disk..end_block_id_in_disk).enumerate() {
                 // file start pointer in block byte range
                 if file_start_pointer >= start_block_byte_in_file
                     && file_start_pointer < start_block_byte_in_file + BLOCK_SIZE
@@ -508,11 +504,10 @@ impl<'a> File<'a> {
         let spc = self.bpb.sector_per_cluster_usize();
         let cluster_size = spc * BLOCK_SIZE;
 
-        let mut file_start_pointer = offset;
         let cluster_cnt = self.num_cluster(buf.len() + offset);
         let exist_cluster_cnt = self.num_cluster(self.sde.file_size().unwrap());
         let offset_cluster_cnt = offset % cluster_size;
-        let cluster_cnt_to_write = cluster_cnt - offset_cluster_cnt;
+        // let cluster_cnt_to_write = cluster_cnt - offset_cluster_cnt;
         let mut fat = self.fat.clone();
         for _ in 0..offset_cluster_cnt {
             fat = fat.next().unwrap();
@@ -524,11 +519,37 @@ impl<'a> File<'a> {
             let mut f = fat.clone();
             f.find(|_| false);
             // 此时 fat 指向最后一个簇, 该簇在 fat 表中的内容为 EOC
-            let bl = self.fat.blank_cluster();
             // 将 current_cluster 的值由 EOF 改为新分配的 bl
+            let bl = self.write_blank_fat(cluster_cnt - exist_cluster_cnt);
             f.write(f.current_cluster, bl);
-            self.write_blank_fat(cluster_cnt - exist_cluster_cnt);
             f.refresh(bl);
+        } else if cluster_cnt < exist_cluster_cnt {
+            // 不需要分配新的簇
+            // TODO
+            // 释放多余的簇 todo :manage the empty cluster
+            fat.clone()
+                .map(|mut f| f.write(f.current_cluster, 0))
+                .last();
+
+            fat.write(fat.current_cluster, END_OF_CLUSTER);
+        }
+
+        // 填充当前 sector 空余的地方
+        // TODO 已经有 cluster_cnt 是不是不用判断是否 need_new_cluster
+        let (need_new_cluster, index) =
+            self.fill_rest_sector_in_cluster(buf, fat.current_cluster, offset);
+        if need_new_cluster {
+            // buf: 还未写的数据
+            let buf_left = &buf[index..];
+            // 完善根据 buf 长度簇链 (分配簇)
+            let bl = self.write_blank_fat(cluster_cnt - exist_cluster_cnt);
+            fat.write(fat.current_cluster, bl);
+            // TODO
+            // Q: why refresh
+            // A: refresh to trigger next() for updating prev_cluster and next_cluster
+            fat.refresh(bl);
+
+            self.basic_write(buf_left, &fat);
         }
 
         Ok(0)
@@ -549,28 +570,31 @@ impl<'a> File<'a> {
                     .map(|mut f| f.write(f.current_cluster, 0))
                     .last(); // 迭代器是懒惰求值的, 只有在它们被消耗时才会执行操作, 故这里使用 last() 来触发迭代器的执行
 
+                // TODO bug: 似乎没有续上
                 // 重新设置链接情况
-                self.write_blank_fat(cluster_cnt);
+                let bl = self.write_blank_fat(cluster_cnt);
+                self.fat.write(self.fat.start_cluster, bl);
                 self.basic_write(buf, &self.fat);
             }
             WriteType::Append => {
                 let mut fat = self.fat.clone();
-                let exist_fat_cnt = fat.clone().count();
+                let exist_cluster_cnt = fat.clone().count();
                 // 修改 fat: 迭代 fat 使 fat.current_cluster 为簇链的最后一个簇, 即找到最后一个簇的位置
                 fat.find(|_| false);
 
                 // 填充当前 sector 空余的地方
                 // TODO 已经有 cluster_cnt 是不是不用判断是否 need_new_cluster
-                let (need_new_cluster, index) =
-                    self.fill_rest_sector_in_cluster(buf, fat.current_cluster);
+                let (need_new_cluster, index) = self.fill_rest_sector_in_cluster(
+                    buf,
+                    fat.current_cluster,
+                    self.sde.file_size().unwrap(),
+                );
                 if need_new_cluster {
                     // buf: 还未写的数据
                     let buf_left = &buf[index..];
-                    let bl = self.fat.blank_cluster();
-
-                    fat.write(fat.current_cluster, bl);
                     // 完善根据 buf 长度簇链 (分配簇)
-                    self.write_blank_fat(cluster_cnt - exist_fat_cnt);
+                    let bl = self.write_blank_fat(cluster_cnt - exist_cluster_cnt);
+                    fat.write(fat.current_cluster, bl);
                     // TODO
                     // Q: why refresh
                     // A: refresh to trigger next() for updating prev_cluster and next_cluster
@@ -596,10 +620,16 @@ impl<'a> File<'a> {
     //  返回值
     //  - bool: 是否需要新的簇
     //  - usize: 已经填充的字节数
-    fn fill_rest_sector_in_cluster(&self, buf: &[u8], cluster_id: u32) -> (bool, usize) {
+    fn fill_rest_sector_in_cluster(
+        &self,
+        buf: &[u8],
+        cluster_id: u32,
+        offset: usize,
+    ) -> (bool, usize) {
         let spc = self.bpb.sector_per_cluster_usize();
         // Q: 如果length 超过一个簇的大小怎么办? -> retern false, 上层创建簇链再继续写
-        let length = self.sde.file_size().unwrap();
+        // let length = self.sde.file_size().unwrap();
+        let length = offset;
         // 获取已经使用的扇区数
         let get_used_sector = |len: usize| {
             if len % (spc * BLOCK_SIZE) == 0 && length != 0 {
@@ -902,18 +932,24 @@ impl<'a> File<'a> {
     /// Write Blank FAT
     //
     //  完善簇链
-    fn write_blank_fat(&mut self, num_cluster: usize) {
+    fn write_blank_fat(&mut self, num_cluster: usize) -> u32 {
+        let mut ret = END_OF_CLUSTER;
         for n in 0..num_cluster {
             // 类似于创建一个空节点
+            // 注意, 在调用 write_blank_fat 之前, 会调用
             let bl1 = self.fat.blank_cluster();
+            if n == 0 {
+                ret = bl1;
+            }
             self.fat.write(bl1, END_OF_CLUSTER);
 
-            let bl2 = self.fat.blank_cluster();
             if n != num_cluster - 1 {
+                let bl2 = self.fat.blank_cluster();
                 // 类似于 bl1.val = bl2
                 self.fat.write(bl1, bl2);
             }
         }
+        ret
     }
 }
 
