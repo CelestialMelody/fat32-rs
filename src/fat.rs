@@ -123,7 +123,6 @@ impl ClusterChain {
         value.reverse();
 
         // TODO
-        // 1. use cache
         // 2. check
         assert!(offset % BLOCK_SIZE == 0);
         let block_id = offset / BLOCK_SIZE;
