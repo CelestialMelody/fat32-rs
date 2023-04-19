@@ -38,13 +38,12 @@ pub struct File<'a> {
     pub(crate) dir_cluster: u32,
     pub(crate) sde: Entry,
     // pub(crate) lde: Vec<Entry>,
-    pub(crate) fat: ClusterChain,
+    pub(crate) fat: ClusterChain, // read only
 }
 
 /// To Read File Per Sector By Iterator
 pub struct ReadIter<'a> {
     device: Arc<dyn BlockDevice>,
-    // TODO: Use blcok cache manager to manage cache/buffer
     buffer: [u8; FILE_BUFFER_SIZE],
     bpb: &'a BIOSParameterBlock,
     fat: ClusterChain,
@@ -65,7 +64,7 @@ impl<'a> File<'a> {
             // 如果 start >= end, 则说明 offset 已经超过了文件的大小, 无法读取
             return Err(FileError::ReadOutOfBound);
         }
-        let need_to_read_len = end - offset;
+        let mut need_to_read_len = end - offset;
         let cluster_cnt_to_read = self.num_cluster(need_to_read_len);
 
         // 2. 确定起始簇号, 以及簇内块号以及块号
@@ -84,7 +83,7 @@ impl<'a> File<'a> {
 
         // 3. 读取数据
         // 读取 offset 所在簇的余下数据
-        let (need_read_next_cluster, already_read) =
+        let (need_read_next_cluster, mut already_read) =
             self.read_rest_sector_in_cluster(buf, offset, need_to_read_len, fat.current_cluster);
         need_to_read_len -= already_read;
 
@@ -136,10 +135,10 @@ impl<'a> File<'a> {
         assert!(offset % BLOCK_SIZE == 0);
         let block_id = offset / BLOCK_SIZE;
 
+        // TODO
+        // check
         // 先尝试读取一个扇区/块
         if left_start != 0 {
-            // TODO
-            // check
             // 文件原本的大小不是刚好占满一个扇区/块
             let option = get_block_cache(block_id, Arc::clone(&self.device));
             if let Some(cache) = option {
@@ -176,8 +175,6 @@ impl<'a> File<'a> {
             let num_sector = cmp::min(cluster_left_sector, buf_needed_sector);
             for s in 0..num_sector {
                 // 读取到 data 中
-                // TODO
-                // check cache
                 let block_id = offset / BLOCK_SIZE + s;
                 assert!(offset % BLOCK_SIZE == 0);
                 let option = get_block_cache(block_id, Arc::clone(&self.device));
@@ -209,14 +206,10 @@ impl<'a> File<'a> {
     // check
     fn basic_read(&self, buf: &mut [u8], fat: &ClusterChain) -> usize {
         let spc = self.bpb.sector_per_cluster_usize();
-        let buf_read = [0u8; BLOCK_SIZE];
+        let mut buf_read = [0u8; BLOCK_SIZE];
         let mut sec_cnt_to_read = get_needed_sector(buf.len());
 
-        let get_mut_slice = |start_block_id: usize, block_cnt: usize| -> &mut [u8] {
-            &mut buf[start_block_id * BLOCK_SIZE..(start_block_id + block_cnt) * BLOCK_SIZE]
-        };
-
-        let blocks_have_read = 0;
+        let mut blocks_have_read = 0;
         fat.clone()
             .map(|f| {
                 // blk_cnt: block count need to write
@@ -248,7 +241,7 @@ impl<'a> File<'a> {
                                     .read_blocks(&mut buf_read, offset + i * BLOCK_SIZE, 1)
                                     .unwrap();
                             }
-                            self.buf_read(&buf_read, blocks_have_read, &mut buf);
+                            self.buf_read(&buf_read, blocks_have_read, buf);
                             blocks_have_read += 1;
                         }
                     } else {
@@ -323,7 +316,7 @@ impl<'a> File<'a> {
                             .unwrap();
                     }
 
-                    self.buf_read(&buf_read, blocks_have_read, &mut buf);
+                    self.buf_read(&buf_read, blocks_have_read, buf);
                     blocks_have_read += 1;
                 }
             })
@@ -457,6 +450,8 @@ impl<'a> File<'a> {
             return Err(FileError::BufTooSmall);
         }
 
+        // TODO
+        // check
         let mut file_pointer = 0;
         self.fat
             .clone()
@@ -473,8 +468,6 @@ impl<'a> File<'a> {
                     file_pointer + cluster_size
                 };
 
-                // TODO
-                // check
                 for i in 0..block_cnt {
                     assert!(cluster_offset_in_disk % BLOCK_SIZE == 0);
                     let block_id = cluster_offset_in_disk / BLOCK_SIZE + i;
@@ -505,32 +498,38 @@ impl<'a> File<'a> {
                         file_pointer += cluster_size;
                     }
                 }
-
-                // end - index 不一定是块的整数倍
-                // let mut cluster_buffer = Vec::<u8>::with_capacity(cluster_size);
-                // let len = end - file_pointer;
-                // self.device
-                //     // TODO
-                //     // 未使用缓存
-                //     .read_blocks(
-                //         cluster_buffer.as_mut_slice(),
-                //         cluster_offset_in_disk,
-                //         block_cnt,
-                //     )
-                //     .unwrap();
-                // buf[file_pointer..end].copy_from_slice(&cluster_buffer[0..len]);
-                // file_pointer += cluster_size;
             })
             .last();
 
         Ok(length)
     }
 
-    pub fn write_at(&mut self, buf: &[u8], offset: usize) -> Result<usize, FileError> {
+    pub fn write_at_(&mut self, buf: &[u8], offset: usize) -> Result<usize, FileError> {
         let spc = self.bpb.sector_per_cluster_usize();
         let cluster_size = spc * BLOCK_SIZE;
 
         let mut file_start_pointer = offset;
+        let cluster_cnt = self.num_cluster(buf.len() + offset);
+        let exist_cluster_cnt = self.num_cluster(self.sde.file_size().unwrap());
+        let offset_cluster_cnt = offset % cluster_size;
+        let cluster_cnt_to_write = cluster_cnt - offset_cluster_cnt;
+        let mut fat = self.fat.clone();
+        for _ in 0..offset_cluster_cnt {
+            fat = fat.next().unwrap();
+        }
+
+        // 簇号处理
+        if cluster_cnt > exist_cluster_cnt {
+            // 需要分配新的簇
+            let mut f = fat.clone();
+            f.find(|_| false);
+            // 此时 fat 指向最后一个簇, 该簇在 fat 表中的内容为 EOC
+            let bl = self.fat.blank_cluster();
+            // 将 current_cluster 的值由 EOF 改为新分配的 bl
+            f.write(f.current_cluster, bl);
+            self.write_blank_fat(cluster_cnt - exist_cluster_cnt);
+            f.refresh(bl);
+        }
 
         Ok(0)
     }
@@ -561,6 +560,7 @@ impl<'a> File<'a> {
                 fat.find(|_| false);
 
                 // 填充当前 sector 空余的地方
+                // TODO 已经有 cluster_cnt 是不是不用判断是否 need_new_cluster
                 let (need_new_cluster, index) =
                     self.fill_rest_sector_in_cluster(buf, fat.current_cluster);
                 if need_new_cluster {
@@ -625,10 +625,10 @@ impl<'a> File<'a> {
         assert!(offset % BLOCK_SIZE == 0);
         let block_id = offset / BLOCK_SIZE;
 
+        // TODO
+        // check
         // 先尝试填充一个扇区/块
         if left_start != 0 {
-            // TODO
-            // check
             // 文件原本的大小不是刚好占满一个扇区/块
             let option = get_block_cache(block_id, Arc::clone(&self.device));
             if let Some(cache) = option {
@@ -652,8 +652,6 @@ impl<'a> File<'a> {
                 used_sector = get_used_sector(length + already_fill);
                 buf_has_left = true;
             };
-            // TODO
-            // check
             let option = get_block_cache(block_id, Arc::clone(&self.device));
             if let Some(cache) = option {
                 cache.write().modify(0, |buffer: &mut [u8; 512]| {
@@ -674,8 +672,6 @@ impl<'a> File<'a> {
             let num_sector = cmp::min(cluster_left_sector, buf_needed_sector);
             for s in 0..num_sector {
                 self.buf_write(&buf[index..], s, &mut data);
-                // TODO
-                // check
                 let block_id = offset / BLOCK_SIZE + s;
                 assert!(offset % BLOCK_SIZE == 0);
                 let option = get_block_cache(block_id, Arc::clone(&self.device));
@@ -697,7 +693,6 @@ impl<'a> File<'a> {
             }
         }
 
-        // TODO
         (false, index)
     }
 
@@ -712,6 +707,8 @@ impl<'a> File<'a> {
             &buf[start_block_id * BLOCK_SIZE..(start_block_id + block_cnt) * BLOCK_SIZE]
         };
 
+        // TODO
+        // check
         // 已经写入的扇区数
         let mut writen_block = 0;
         fat.clone()
@@ -733,8 +730,6 @@ impl<'a> File<'a> {
                 if block_cnt_to_write == spc {
                     // buf 中的数据可以写完
                     if (writen_block + block_cnt_to_write) * BLOCK_SIZE > buf.len() {
-                        // TODO
-                        // check
                         for i in 0..block_cnt_to_write {
                             self.buf_write(&buf, writen_block, &mut buf_write);
 
@@ -779,15 +774,6 @@ impl<'a> File<'a> {
                                 break;
                             }
                         }
-
-                        // self.device
-                        //     .write_blocks(
-                        //         get_slice(writen_block, block_cnt_to_write),
-                        //         offset,
-                        //         block_cnt_to_write,
-                        //     )
-                        //     .unwrap();
-                        // writen_block += block_cnt_to_write;
                     }
                 } else {
                     // 如果需要写入的扇区数没有超过一个簇的扇区数
@@ -818,17 +804,6 @@ impl<'a> File<'a> {
                         }
                     }
 
-                    // self.device
-                    //     .write_blocks(
-                    //         get_slice(writen_block, block_cnt_to_write - 1),
-                    //         offset,
-                    //         // block_cnt_to_write - 1 是因为 block_cnt_to_write 这个扇区不一定完全写完
-                    //         block_cnt_to_write - 1,
-                    //     )
-                    //     .unwrap();
-
-                    // writen_block += block_cnt_to_write - 1;
-
                     // 对 block_cnt_to_write 这个扇区进行写
                     self.buf_write(&buf, writen_block, &mut buf_write);
 
@@ -848,14 +823,6 @@ impl<'a> File<'a> {
                             .unwrap();
                     }
                     writen_block += 1;
-
-                    // self.device
-                    //     .write_blocks(
-                    //         &buf_write,
-                    //         offset + (block_cnt_to_write - 1) * BLOCK_SIZE,
-                    //         1,
-                    //     )
-                    //     .unwrap();
                 }
             })
             .last();
@@ -906,10 +873,11 @@ impl<'a> File<'a> {
     fn buf_read(&self, from: &[u8], block_idx: usize, to: &mut [u8]) {
         let index = block_idx * BLOCK_SIZE;
         let index_end = index + BLOCK_SIZE;
-        if to.len() < index_end {
-            to.copy_from_slice(&from[index..index + to.len()])
+        let to_len = to.len() - index;
+        if to_len < index_end {
+            to[index..index + to_len].copy_from_slice(&from)
         } else {
-            to.copy_from_slice(&from[index..index_end])
+            to[index..index_end].copy_from_slice(&from);
         }
     }
 

@@ -418,7 +418,7 @@ impl<'a> DirIter<'a> {
             self.clean_new_cluster_data(blank_cluster);
             self.fat.write(blank_cluster, 0x0FFFFFFF);
             self.fat.write(self.fat.current_cluster, blank_cluster);
-            self.fat.previous();
+            self.fat.to_previous();
             self.fat.next();
             self.fat.next();
             self.offset = self.bpb.offset(blank_cluster);
@@ -440,7 +440,7 @@ impl<'a> DirIter<'a> {
             let spc = self.bpb.sector_per_cluster_usize();
             self.sector_offset = spc - 1;
             self.index = BLOCK_SIZE - 32;
-            self.fat.previous();
+            self.fat.to_previous();
             self.update_buffer();
         }
     }
