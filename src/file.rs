@@ -53,6 +53,11 @@ pub struct ReadIter<'a> {
 }
 
 impl<'a> File<'a> {
+    /// Read File at Offset
+    ///
+    /// Based on geiven file offset and read file content into buf
+    ///
+    /// Return Read Length
     pub fn read_at_(&self, buf: &mut [u8], offset: usize) -> Result<usize, FileError> {
         let spc = self.bpb.sector_per_cluster_usize();
 
@@ -97,6 +102,9 @@ impl<'a> File<'a> {
         Ok(already_read)
     }
 
+    /// Read File
+    ///
+    /// Based on the given file offset, find the corresponding cluster and read the block/sector after the offset.
     pub fn read_rest_sector_in_cluster(
         &self,
         buf: &mut [u8],
@@ -500,7 +508,12 @@ impl<'a> File<'a> {
         Ok(length)
     }
 
-    pub fn write_at_(&mut self, buf: &[u8], offset: usize) -> Result<usize, FileError> {
+    /// Write Buffer To File, Return File Length
+    ///
+    /// Based on geiven file offset and write file content from buf
+    //
+    // pub fn write_at_(&mut self, buf: &[u8], offset: usize) -> Result<usize, FileError> {
+    pub fn write_at_(&mut self, buf: &[u8], offset: usize) -> Result<(), FileError> {
         let spc = self.bpb.sector_per_cluster_usize();
         let cluster_size = spc * BLOCK_SIZE;
 
@@ -552,7 +565,10 @@ impl<'a> File<'a> {
             self.basic_write(buf_left, &fat);
         }
 
-        Ok(0)
+        // 更新文件大小
+        self.update_file_size(buf.len() + offset);
+
+        Ok(())
     }
 
     /// Write Data To File, Using Append OR OverWritten
