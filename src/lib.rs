@@ -45,6 +45,10 @@ pub const LONG_NAME_LEN: u32 = 13;
 
 pub const BLOCK_CACHE_LIMIT: usize = 64;
 
+// Charactor
+pub const SPACE: u8 = 0x20;
+pub const DOT: u8 = 0x2E;
+
 /// BPB Bytes Per Sector
 pub const BLOCK_SIZE: usize = 512;
 pub const CACHE_SIZE: usize = 512;
@@ -135,8 +139,11 @@ pub(crate) fn sfn_or_lfn(name: &str) -> NameType {
     }
 }
 
-pub(crate) fn get_len_of_lfn(value: &str) -> usize {
-    let num_char = value.chars().count();
+/// 根据文件名, 返回需要的长目录项数目
+pub(crate) fn get_lde_cnt(value_str: &str) -> usize {
+    // eg. value = "hello, 你好!" -> value.chars().count() = 10
+    let num_char = value_str.chars().count();
+    // 向上取整
     if num_char % 13 == 0 {
         num_char / 13
     } else {
@@ -144,6 +151,7 @@ pub(crate) fn get_len_of_lfn(value: &str) -> usize {
     }
 }
 
+/// 根据文件名, 获取对应的第 count 个长目录项的名字对应于文件名的下标
 pub(crate) fn get_lfn_index(value_str: &str, count: usize) -> usize {
     let end = 13 * (count - 1);
     let mut len = 0;

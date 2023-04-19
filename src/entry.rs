@@ -193,7 +193,7 @@ use crate::dir::OpType;
 use crate::{
     ATTR_ARCHIVE, ATTR_DIRECTORY, ATTR_HIDDEN, ATTR_LONG_NAME, ATTR_READ_ONLY, ATTR_SYSTEM,
     ATTR_VOLUME_ID, DIR_ENTRY_LAST_AND_UNUSED, DIR_ENTRY_UNUSED, LAST_LONG_ENTRY,
-    LONG_DIR_ENT_NAME_CAPACITY,
+    LONG_DIR_ENT_NAME_CAPACITY, SPACE,
 };
 
 use alloc::string::{String, ToString};
@@ -332,8 +332,8 @@ impl ShortDirEntry {
     // All names must check if they have existed in the directory
     pub fn new(cluster: u32, name: &[u8], extension: &[u8], create_type: OpType) -> Self {
         let mut item = Self::empty();
-        let mut name_: [u8; 8] = [0x20; 8];
-        let mut extension_: [u8; 3] = [0x20; 3];
+        let mut name_: [u8; 8] = [SPACE; 8];
+        let mut extension_: [u8; 3] = [SPACE; 3];
         name_[0..name.len()].copy_from_slice(name);
         extension_[0..extension.len()].copy_from_slice(extension);
 
@@ -358,7 +358,7 @@ impl ShortDirEntry {
         };
 
         let mut item = [0; 32];
-        let _item = [0x20; 11]; // invalid name
+        let _item = [SPACE; 11]; // invalid name
 
         // 初始化为 0x20, 0x20 为 ASCII 码中的空格字符; 0x00..0x0B = 0..11
         item[0x00..0x0B].copy_from_slice(&_item);
@@ -418,11 +418,11 @@ impl ShortDirEntry {
 
     // All names must check if they have existed in the directory
     pub fn set_name(&mut self, name: &[u8], extension: &[u8]) {
-        let mut name_: [u8; 8] = [0x20; 8];
+        let mut name_: [u8; 8] = [SPACE; 8];
         name_[0..name.len()].make_ascii_uppercase();
         name_[0..name.len()].copy_from_slice(name);
 
-        let mut extension_: [u8; 3] = [0x20; 3];
+        let mut extension_: [u8; 3] = [SPACE; 3];
         extension_[0..extension.len()].make_ascii_uppercase();
         extension_[0..extension.len()].copy_from_slice(extension);
         self.name = name_;
@@ -451,8 +451,8 @@ impl ShortDirEntry {
     }
 
     pub fn name(&self) -> String {
-        let name_len = self.name.iter().position(|&x| x == 0x20).unwrap_or(8);
-        let ext_len = self.extension.iter().position(|&x| x == 0x20).unwrap_or(3);
+        let name_len = self.name.iter().position(|&x| x == SPACE).unwrap_or(8);
+        let ext_len = self.extension.iter().position(|&x| x == SPACE).unwrap_or(3);
         macro_rules! as_u8str {
             ($a:expr) => {
                 core::str::from_utf8(&$a).unwrap_or("")
@@ -477,19 +477,19 @@ impl ShortDirEntry {
         let mut full_name = [0; 12];
 
         for &i in self.name.iter() {
-            if i != 0x20 {
+            if i != SPACE {
                 full_name[len] = i;
                 len += 1;
             }
         }
 
-        if self.extension[0] != 0x20 {
+        if self.extension[0] != SPACE {
             full_name[len] = b'.';
             len += 1;
         }
 
         for &i in self.extension.iter() {
-            if i != 0x20 {
+            if i != SPACE {
                 full_name[len] = i;
                 len += 1;
             }
@@ -503,14 +503,14 @@ impl ShortDirEntry {
         let mut len = 0;
 
         for &i in self.name.iter() {
-            if i != 0x20 {
+            if i != SPACE {
                 full_name[len] = i;
                 len += 1;
             }
         }
 
         for &i in self.extension.iter() {
-            if i != 0x20 {
+            if i != SPACE {
                 full_name[len] = i;
                 len += 1;
             }
@@ -650,14 +650,14 @@ impl ShortDirEntry {
     pub fn get_name_uppercase(&self) -> String {
         let mut name: String = String::new();
         for i in 0..8 {
-            if self.name[i] == 0x20 {
+            if self.name[i] == SPACE {
                 break;
             } else {
                 name.push(self.name[i] as char);
             }
         }
         for i in 0..3 {
-            if self.extension[i] == 0x20 {
+            if self.extension[i] == SPACE {
                 break;
             } else {
                 if i == 0 {
@@ -1147,10 +1147,12 @@ impl Entry {
         }
     }
 
-    pub(crate) fn to_bytes_array(&self) -> (Option<[u8; 32]>, Option<[u8; 32]>) {
-        let mut sde_bytes: Option<[u8; 32]> = self.sde.map(|sde| sde.to_bytes_array());
-        let mut lde_bytes: Option<[u8; 32]> = self.lde.map(|lde| lde.to_bytes_array());
-        (sde_bytes, lde_bytes)
+    pub(crate) fn to_bytes_array(&self) -> [u8; 32] {
+        if self.sde.is_some() {
+            self.sde.as_ref().unwrap().to_bytes_array()
+        } else {
+            self.lde.as_ref().unwrap().to_bytes_array()
+        }
     }
 
     pub(crate) fn sde_to_bytes_array(&self) -> Option<[u8; 32]> {
