@@ -75,7 +75,6 @@ impl ClusterChain {
 
         for block in 0.. {
             // TODO
-            // 1. use cache
             // 2. check
             let offset = self.fat1_offset + block * BLOCK_SIZE;
             assert!(offset % BLOCK_SIZE == 0);
@@ -156,6 +155,7 @@ impl ClusterChain {
         if self.current_cluster != 0 {
             self.next_cluster = Some(self.current_cluster);
             self.current_cluster = self.previous_cluster;
+            // self.previous_cluster  is unchanged(unknown)
             Ok(())
         } else {
             Err(FatError::NonePreviousCluster)
@@ -202,7 +202,6 @@ impl Iterator for ClusterChain {
         let offset_left = offset % BLOCK_SIZE;
 
         // TODO
-        // 1. use cache
         // 2. check
         assert!(self.fat1_offset % BLOCK_SIZE == 0);
         let block_id = self.fat1_offset / BLOCK_SIZE + block_offset;
