@@ -863,19 +863,22 @@ impl<'a> File<'a> {
         let index = block_idx * BLOCK_SIZE;
         let index_end = index + BLOCK_SIZE;
         if from.len() < index_end {
+            let len = from.len() - index;
             to.copy_from_slice(&[0; BLOCK_SIZE]);
-            to[0..from.len() - index].copy_from_slice(&from[index..])
+            to[0..len].copy_from_slice(&from[index..])
         } else {
             to.copy_from_slice(&from[index..index_end])
         }
     }
 
+    // TODO check
     fn buf_read(&self, from: &[u8], block_idx: usize, to: &mut [u8]) {
         let index = block_idx * BLOCK_SIZE;
         let index_end = index + BLOCK_SIZE;
-        let to_len = to.len() - index;
+        let to_len = to.len();
         if to_len < index_end {
-            to[index..index + to_len].copy_from_slice(&from)
+            let len = to_len - index;
+            to[index..].copy_from_slice(&from[0..len])
         } else {
             to[index..index_end].copy_from_slice(&from);
         }
