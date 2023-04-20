@@ -144,7 +144,7 @@ impl<'a> Dir<'a> {
         let mut index = get_lfn_index(value, count);
         let mut has_match = true;
 
-        // 倒着找？
+        // TODO 倒着找? -> 倒着创建?
 
         // TODO 直接last?
         let result = iter.find(|d| {
@@ -214,6 +214,7 @@ impl<'a> Dir<'a> {
 
                 self.write_directory_item(di, NameType::LFN);
 
+                // TODO 为什么倒着创建?
                 for c in (1..count).rev() {
                     let value = &value[0..lfn_index];
                     lfn_index = get_lfn_index(value, c);
@@ -260,16 +261,16 @@ impl<'a> Dir<'a> {
 
         match sfn_or_lfn(name) {
             NameType::SFN => {
-                iter.previous();
+                iter.to_previous();
                 iter.set_deleted();
-                iter.update();
+                iter.update_in_disk();
             }
             NameType::LFN => {
                 let count = get_lde_cnt(name);
                 for _ in 0..=count {
-                    iter.previous();
+                    iter.to_previous();
                     iter.set_deleted();
-                    iter.update();
+                    iter.update_in_disk();
                 }
             }
         }
@@ -289,9 +290,9 @@ impl<'a> Dir<'a> {
                 if d.is_deleted() {
                     continue;
                 }
-                iter.previous();
+                iter.to_previous();
                 iter.set_deleted();
-                iter.update();
+                iter.update_in_disk();
                 iter.next();
             } else {
                 break;
@@ -313,7 +314,7 @@ impl<'a> Dir<'a> {
             }
         }
         iter.update_item(&di_bytes);
-        iter.update();
+        iter.update_in_disk();
     }
 
     /// Clean Sectors In Cluster, To Avoid Dirty Data
@@ -321,9 +322,19 @@ impl<'a> Dir<'a> {
         let spc = self.bpb.sector_per_cluster_usize();
         for i in 0..spc {
             let offset = self.bpb.offset(cluster) + i * BLOCK_SIZE;
-            self.device
-                .write_blocks(&[0; BLOCK_SIZE], offset, 1)
-                .unwrap();
+            let block_id = offset / BLOCK_SIZE;
+            assert!(offset % BLOCK_SIZE == 0);
+
+            let option = get_block_cache(block_id, Arc::clone(&self.device));
+            if let Some(cache) = option {
+                cache.write().modify(0, |cache: &mut [u8; BLOCK_SIZE]| {
+                    cache.copy_from_slice(&[0; BLOCK_SIZE])
+                })
+            } else {
+                self.device
+                    .write_blocks(&[0; BLOCK_SIZE], offset, 1)
+                    .unwrap();
+            }
         }
     }
 
@@ -372,6 +383,7 @@ impl<'a> DirIter<'a> {
         fat: ClusterChain,
         bpb: &BIOSParameterBlock,
     ) -> DirIter {
+        // TODO 为什么要 next? 难道是 fat.current_cluster = 0? 是否需要 assert?
         let mut fat = fat;
         fat.next();
 
@@ -386,11 +398,12 @@ impl<'a> DirIter<'a> {
         }
     }
 
-    fn offset_value(&self) -> usize {
+    fn sector_offset(&self) -> usize {
         self.cluster_offset + self.sector_id_in_cluster * BLOCK_SIZE
     }
 
-    fn offset_index(&mut self) {
+    // next() 时更新 iter 的值
+    fn val_next(&mut self) {
         let spc = self.bpb.sector_per_cluster_usize();
 
         self.index_in_buf += 32;
@@ -459,7 +472,8 @@ impl<'a> DirIter<'a> {
         self.buffer[self.index_in_buf..self.index_in_buf + 32].copy_from_slice(buf);
     }
 
-    pub(crate) fn previous(&mut self) {
+    // TODO 可以确保一定有 previous 吗?
+    pub(crate) fn to_previous(&mut self) {
         if self.index_in_buf == 0 && self.sector_id_in_cluster != 0 {
             self.index_in_buf = BLOCK_SIZE - 32;
             self.sector_id_in_cluster -= 1;
@@ -467,12 +481,17 @@ impl<'a> DirIter<'a> {
         } else if self.index_in_buf != 0 {
             self.index_in_buf -= 32;
         } else {
+            // TODO 可以确保一定有 previous 吗?
+            // self.sector_id_in_cluster == 0
+
+            // TODO 错误处理 (断言有 previous)
+            assert_ne!(self.fat.current_cluster, 0);
+
             let spc = self.bpb.sector_per_cluster_usize();
             self.sector_id_in_cluster = spc - 1;
             self.index_in_buf = BLOCK_SIZE - 32;
 
-            // TODO 错误处理
-            assert_ne!(self.fat.current_cluster, 0);
+            // assert_ne!(self.fat.current_cluster, 0);
 
             let _ = self.fat.to_previous();
             self.update_buffer();
@@ -480,7 +499,7 @@ impl<'a> DirIter<'a> {
     }
 
     pub(crate) fn update_buffer(&mut self) {
-        let offset = self.offset_value();
+        let offset = self.sector_offset();
         let block_id = offset / BLOCK_SIZE;
         assert!(offset % BLOCK_SIZE == 0);
 
@@ -496,9 +515,9 @@ impl<'a> DirIter<'a> {
         }
     }
 
-    pub(crate) fn update(&self) {
-        let block_id = self.offset_value() / BLOCK_SIZE;
-        assert!(self.offset_value() % BLOCK_SIZE == 0);
+    pub(crate) fn update_in_disk(&self) {
+        let block_id = self.sector_offset() / BLOCK_SIZE;
+        assert!(self.sector_offset() % BLOCK_SIZE == 0);
 
         let option = get_block_cache(block_id, Arc::clone(&self.device));
         if let Some(cache) = option {
@@ -507,7 +526,7 @@ impl<'a> DirIter<'a> {
             })
         } else {
             self.device
-                .write_blocks(&self.buffer, self.offset_value(), 1)
+                .write_blocks(&self.buffer, self.sector_offset(), 1)
                 .unwrap();
         }
     }
@@ -539,6 +558,7 @@ impl<'a> Iterator for DirIter<'a> {
 
     fn next(&mut self) -> Option<Self::Item> {
         if self.index_in_buf == 0 {
+            // index_in_buf == 0 仅在 new() , is_end_sector(), val_next() 时
             self.update_buffer();
         }
 
@@ -547,13 +567,17 @@ impl<'a> Iterator for DirIter<'a> {
         };
 
         if self.is_special_item() {
-            self.offset_index();
+            self.val_next();
             self.next()
         } else {
             let buf = self.get_part_buf();
             let di = Entry::from_buf(buf);
-            self.offset_index();
+            self.val_next();
             Some(di)
         }
     }
 }
+
+// TODO 长文件名转短文件名
+// TODO 短文件名转长文件名
+// TODO 修改文件名

@@ -940,9 +940,9 @@ impl<'a> File<'a> {
         .unwrap();
 
         self.sde.set_file_size(length);
-        iter.previous();
+        iter.to_previous();
         iter.update_item(&self.sde.sde_to_bytes_array().unwrap());
-        iter.update();
+        iter.update_in_disk();
     }
 
     /// Write Blank FAT
