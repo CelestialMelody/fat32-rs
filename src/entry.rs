@@ -189,7 +189,7 @@
 //! FAT Long Directory Entries
 //!
 
-use crate::dir::OpType;
+use crate::VirFileType;
 use crate::{
     ATTR_ARCHIVE, ATTR_DIRECTORY, ATTR_HIDDEN, ATTR_LONG_NAME, ATTR_READ_ONLY, ATTR_SYSTEM,
     ATTR_VOLUME_ID, DIR_ENTRY_LAST_AND_UNUSED, DIR_ENTRY_UNUSED, LAST_LONG_ENTRY,
@@ -330,7 +330,7 @@ impl Default for ShortDirEntry {
 
 impl ShortDirEntry {
     // All names must check if they have existed in the directory
-    pub fn new(cluster: u32, name: &[u8], extension: &[u8], create_type: OpType) -> Self {
+    pub fn new(cluster: u32, name: &[u8], extension: &[u8], create_type: VirFileType) -> Self {
         let mut item = Self::empty();
         let mut name_: [u8; 8] = [SPACE; 8];
         let mut extension_: [u8; 3] = [SPACE; 3];
@@ -343,15 +343,15 @@ impl ShortDirEntry {
         item.name = name_;
         item.extension = extension_;
         match create_type {
-            OpType::File => item.attr = ATTR_ARCHIVE,
-            OpType::Dir => item.attr = ATTR_DIRECTORY,
+            VirFileType::File => item.attr = ATTR_ARCHIVE,
+            VirFileType::Dir => item.attr = ATTR_DIRECTORY,
         }
         item.set_first_cluster(cluster);
         item
     }
 
     // All names must check if they have existed in the directory
-    pub fn new_form_name_str(cluster: u32, name_str: &str, create_type: OpType) -> Self {
+    pub fn new_form_name_str(cluster: u32, name_str: &str, create_type: VirFileType) -> Self {
         let (name, extension) = match name_str.find('.') {
             Some(i) => (&name_str[0..i], &name_str[i + 1..]),
             None => (&name_str[0..], ""),
@@ -388,15 +388,15 @@ impl ShortDirEntry {
         item[0x1A..0x1C].copy_from_slice(&cluster[0..2]);
 
         match create_type {
-            OpType::Dir => item[0x0B] = ATTR_DIRECTORY,
-            OpType::File => item[0x10] = ATTR_ARCHIVE,
+            VirFileType::Dir => item[0x0B] = ATTR_DIRECTORY,
+            VirFileType::File => item[0x10] = ATTR_ARCHIVE,
         }
 
         unsafe { *(item.as_ptr() as *const ShortDirEntry) }
     }
 
     // All names must check if they have existed in the directory
-    pub fn new_from_name_bytes(cluster: u32, name_bytes: &[u8], create_type: OpType) -> Self {
+    pub fn new_from_name_bytes(cluster: u32, name_bytes: &[u8], create_type: VirFileType) -> Self {
         let mut item = [0; 32];
         item[0x00..0x0B].copy_from_slice(name_bytes);
 
@@ -409,8 +409,8 @@ impl ShortDirEntry {
         item[0x1A..0x1C].copy_from_slice(&cluster[0..2]);
 
         match create_type {
-            OpType::Dir => item[0x0B] = ATTR_DIRECTORY,
-            OpType::File => item[0x10] = ATTR_ARCHIVE,
+            VirFileType::Dir => item[0x0B] = ATTR_DIRECTORY,
+            VirFileType::File => item[0x10] = ATTR_ARCHIVE,
         }
 
         unsafe { *(item.as_ptr() as *const ShortDirEntry) }
@@ -787,6 +787,8 @@ pub struct LongDirEntry {
     /// CharSet: Unicode. Codeing: UTF-16LE
     ///
     /// Long Dir Entry Name 2  size: 12 bytes  offset: 14 (0x0E~0x19)
+    ///
+    //  文件名的第 6~11 个字符, 未使用的字节用 0xFF 填充
     name2: [u16; 6],
     /// Must be ZERO.
     /// This is an artifact of the FAT "first cluster",
@@ -794,9 +796,6 @@ pub struct LongDirEntry {
     /// It's meaningless in the context of a long dir entry.
     ///
     /// Long Dir Entry First Cluster Low   size: 2 bytes   offset: 26 (Ox1A~0x1B)     value: 0
-    //
-    //  文件名的第 6~11 个字符, 未使用的字节用 0xFF 填充
-    // TODO 注释
     fst_clus_lo: u16,
     /// Characters 12-13 of the long-name sub-component in this dir entry.
     /// CharSet: Unicode. Codeing: UTF-16LE
@@ -1055,10 +1054,10 @@ impl EntryType {
         }
     }
 
-    fn from_create(value: OpType) -> EntryType {
+    fn from_create(value: VirFileType) -> EntryType {
         match value {
-            OpType::Dir => EntryType::Dir,
-            OpType::File => EntryType::File,
+            VirFileType::Dir => EntryType::Dir,
+            VirFileType::File => EntryType::File,
         }
     }
 }
@@ -1171,7 +1170,7 @@ impl Entry {
         }
     }
 
-    pub(crate) fn new_sfn_str(cluster: u32, name: &str, create_type: OpType) -> Self {
+    pub(crate) fn new_sfn_str(cluster: u32, name: &str, create_type: VirFileType) -> Self {
         Self {
             item_type: EntryType::from_create(create_type),
             sde: Some(ShortDirEntry::new_form_name_str(cluster, name, create_type)),
@@ -1179,7 +1178,7 @@ impl Entry {
         }
     }
 
-    pub(crate) fn new_sfn_bytes(cluster: u32, name: &[u8], create_type: OpType) -> Self {
+    pub(crate) fn new_sfn_bytes(cluster: u32, name: &[u8], create_type: VirFileType) -> Self {
         Self {
             item_type: EntryType::from_create(create_type),
             sde: Some(ShortDirEntry::new_from_name_bytes(

@@ -185,8 +185,8 @@ use crate::{
 // 使用 #[repr(packed)] 属性可能会导致访问未对齐的内存，这可能会导致不可预测的结果，例如内存访问异常、程序崩溃等
 #[repr(packed)]
 pub struct BIOSParameterBlock {
-    pub(crate) bpb: BasicBPB,
-    pub(crate) bpb32: BPB32,
+    pub(crate) bpb: BasicBPB, // size = 36B
+    pub(crate) bpb32: BPB32,  // size = 54B
 }
 
 /// We intend to realize fat32, so we don't need to care about fat12 and fat16.
@@ -241,18 +241,22 @@ impl BIOSParameterBlock {
 
     #[inline(always)]
     /// Get FAT1 Offset
-    pub fn fat1(&self) -> usize {
+    pub fn fat1_offset(&self) -> usize {
         (self.bpb.rsvd_sec_cnt as usize) * (self.bpb.byts_per_sec as usize)
+    }
+
+    pub fn fat1_sector_id(&self) -> usize {
+        self.bpb.rsvd_sec_cnt as usize
     }
 
     #[inline(always)]
     /// Get FAT2 Offset
-    pub fn fat2(&self) -> usize {
-        self.fat1() + (self.bpb32.fat_sz32 as usize) * (self.bpb.byts_per_sec as usize)
+    pub fn fat2_offset(&self) -> usize {
+        self.fat1_offset() + (self.bpb32.fat_sz32 as usize) * (self.bpb.byts_per_sec as usize)
     }
 
     /// Get sector_per_cluster_usize as usize value
-    pub fn sector_per_cluster_usize(&self) -> usize {
+    pub fn sector_per_cluster(&self) -> usize {
         self.bpb.sec_per_clus as usize
     }
 
@@ -329,6 +333,34 @@ impl BIOSParameterBlock {
         } else {
             FatType::FAT32
         }
+    }
+
+    pub fn bytes_per_sector(&self) -> usize {
+        self.bpb.byts_per_sec as usize
+    }
+
+    pub fn sectors_per_cluster(&self) -> usize {
+        self.bpb.sec_per_clus as usize
+    }
+
+    pub fn fat_cnt(&self) -> usize {
+        self.bpb.num_fats as usize
+    }
+
+    pub fn reserved_sector_cnt(&self) -> usize {
+        self.bpb.rsvd_sec_cnt as usize
+    }
+
+    pub fn total_sector_cnt(&self) -> usize {
+        self.bpb.tot_sec32 as usize
+    }
+
+    pub fn sector_pre_fat(&self) -> usize {
+        self.bpb32.fat_sz32 as usize
+    }
+
+    pub fn fat_info_sector(&self) -> usize {
+        self.bpb32.fs_info as usize
     }
 }
 
@@ -468,7 +500,7 @@ impl BasicBPB {
     pub(crate) fn reserved_sector_cnt(&self) -> u32 {
         self.rsvd_sec_cnt as u32
     }
-    pub(crate) fn sector_pre_fat32(&self) -> u32 {
+    pub(crate) fn total_sector_cnt(&self) -> u32 {
         self.tot_sec32
     }
 }
@@ -712,7 +744,7 @@ impl FSInfo {
     }
 
     // Get the number of free clusters
-    pub fn free_clusters(&self) -> u32 {
+    pub fn free_cluster_cnt(&self) -> u32 {
         self.free_count
     }
 
