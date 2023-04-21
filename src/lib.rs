@@ -1,21 +1,26 @@
 #![no_std]
-pub mod block_cache;
-pub mod block_device;
 pub mod bpb;
+pub mod cache;
+pub mod device;
 pub mod dir;
 pub mod entry;
 pub mod fat;
 pub mod file;
+pub mod fs;
+pub mod vfs;
 
 use crate::dir::DirError;
 use crate::entry::NameType;
-use crate::fat::FatError;
+use crate::fat::ClusterChainErr;
 use crate::file::FileError;
 
 use core::convert::TryInto;
 use core::str;
 
 extern crate alloc;
+
+use alloc::string::String;
+use alloc::vec::Vec;
 
 pub const LEAD_SIGNATURE: u32 = 0x41615252;
 pub const STRUCT_SIGNATURE: u32 = 0x61417272;
@@ -27,6 +32,8 @@ pub const BAD_CLUSTER: u32 = 0x0FFFFFF7;
 /// EOC: End of Cluster Chain
 /// note that we still USE this cluster and this clsuter id is not EOC,
 /// but in FAT table, the value of this cluster is EOC
+///
+/// A FAT32 FAT entry is actually only a 28-bit entry. The high 4 bits of a FAT32 FAT entry are reserved.
 //
 //  在创建新簇时将其在 FAT 表中的值设置为 EOC
 //  这样在 next() 中也判断是否为 EOC
@@ -42,12 +49,13 @@ pub const ATTR_LONG_NAME: u8 = ATTR_READ_ONLY | ATTR_HIDDEN | ATTR_SYSTEM | ATTR
 
 pub const DIRENT_SIZE: usize = 32;
 pub const LONG_NAME_LEN: u32 = 13;
-
+pub const STRAT_CLUSTER_IN_FAT: u32 = 2;
 pub const BLOCK_CACHE_LIMIT: usize = 64;
 
 // Charactor
 pub const SPACE: u8 = 0x20;
 pub const DOT: u8 = 0x2E;
+pub const ROOT: u8 = 0x2F;
 
 /// BPB Bytes Per Sector
 pub const BLOCK_SIZE: usize = 512;
@@ -94,9 +102,15 @@ type Error = BlockDeviceError;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BlockDeviceError {
-    Fat(FatError),
+    ClusterChain(ClusterChainErr),
     Dir(DirError),
     File(FileError),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum VirFileType {
+    Dir,
+    File,
 }
 
 pub(crate) fn read_le_u16(input: &[u8]) -> u16 {
@@ -177,4 +191,93 @@ pub(crate) fn get_needed_sector(value: usize) -> usize {
     } else {
         value / BLOCK_SIZE
     }
+}
+
+/// 将长文件名拆分，返回字符串数组
+pub fn long_name_split(name: &str) -> Vec<[u16; 13]> {
+    let mut name: Vec<u16> = name.encode_utf16().collect();
+    let len = name.len() as u32; // 注意: 要有 \0
+
+    // 计算需要几个目录项，向上取整
+    // 以 13个字符为单位进行切割，每一组占据一个目录项
+    let lfn_cnt = (len + LONG_NAME_LEN - 1) / LONG_NAME_LEN;
+    if len < lfn_cnt * LONG_NAME_LEN {
+        name.push(0x00);
+        while name.len() < (lfn_cnt * LONG_NAME_LEN) as usize {
+            name.push(0xFF);
+        }
+    }
+    name.chunks(LONG_NAME_LEN as usize)
+        .map(|x| {
+            let mut arr = [0u16; 13];
+            arr.copy_from_slice(x);
+            arr
+        })
+        .collect()
+}
+
+/// 拆分文件名和后缀
+pub fn split_name_ext(name: &str) -> (&str, &str) {
+    match name {
+        "." => return (".", ""),
+        ".." => return ("..", ""),
+        _ => {
+            let mut name_and_ext: Vec<&str> = name.split(".").collect(); // 按 . 进行分割
+            if name_and_ext.len() == 1 {
+                // 如果没有后缀名则推入一个空值
+                name_and_ext.push("");
+            }
+            (name_and_ext[0], name_and_ext[1])
+        }
+    }
+}
+
+/// 将短文件名格式化为目录项存储的内容
+pub fn short_name_format(name: &str) -> ([u8; 8], [u8; 3]) {
+    let (name, ext) = split_name_ext(name);
+    let name_bytes = name.as_bytes();
+    let ext_bytes = ext.as_bytes();
+    let mut f_name = [0u8; 8];
+    let mut f_ext = [0u8; 3];
+    for i in 0..8 {
+        if i >= name_bytes.len() {
+            f_name[i] = 0x20; // 不足的用0x20进行填充
+        } else {
+            f_name[i] = (name_bytes[i] as char).to_ascii_uppercase() as u8;
+        }
+    }
+    for i in 0..3 {
+        if i >= ext_bytes.len() {
+            f_ext[i] = 0x20; // 不足的用0x20进行填充
+        } else {
+            f_ext[i] = (ext_bytes[i] as char).to_ascii_uppercase() as u8;
+        }
+    }
+    (f_name, f_ext)
+}
+
+// 由长文件名生成短文件名
+pub fn generate_short_name(long_name: &str) -> String {
+    let (name_, ext_) = split_name_ext(long_name);
+    let name = name_.as_bytes();
+    let extension = ext_.as_bytes();
+    let mut short_name = String::new();
+    // 取长文件名的前6个字符加上"~1"形成短文件名，扩展名不变，
+    // 目前不支持重名，即"~2""~3"; 支持重名与在目录下查找文件的方法绑定
+    for i in 0..6 {
+        short_name.push((name[i] as char).to_ascii_uppercase())
+    }
+    short_name.push('~');
+    short_name.push('1');
+    let ext_len = extension.len();
+    for i in 0..3 {
+        // fill extension
+        if i >= ext_len {
+            short_name.push(0x20 as char); // 不足的用0x20进行填充
+        } else {
+            short_name.push((extension[i] as char).to_ascii_uppercase());
+        }
+    }
+    // 返回一个长度为 11 的string数组
+    short_name
 }
