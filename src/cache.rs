@@ -1,4 +1,4 @@
-use crate::{block_device::BlockDevice, BLOCK_CACHE_LIMIT};
+use crate::{device::BlockDevice, BLOCK_CACHE_LIMIT};
 
 use alloc::sync::Arc;
 // use core::num::NonZeroUsize;
@@ -95,6 +95,8 @@ impl Cache for BlockCache {
                 .unwrap();
         }
     }
+
+    // TODO 是否需要一个无论是否正在读写文件也要同步的方法(即不考虑是否modified, 这样可以拿读锁)
 }
 
 impl Drop for BlockCache {
@@ -129,9 +131,10 @@ impl BlockCacheManager {
         if let Some(pair) = self.lru.get(&block_id) {
             Some(Arc::clone(pair))
         } else {
-            // 如果不在lru_cache中，就创建一个新的block_cache
-            // 如果lru_cache已经满了，就把最久没有使用的block_cache写回磁盘(不过只有引用计数为 0 的时候才会 drop 写回磁盘)
+            // 如果不在lru_cache中, 就创建一个新的block_cache
+            // 如果lru_cache已经满了, 就把最久没有使用的block_cache写回磁盘(不过只有引用计数为 0 的时候才会 drop 写回磁盘)
             // TODO
+            // 理论上缓存需要有极限, 不过是否要限制呢?
             if self.lru.len() == BLOCK_CACHE_LIMIT {
                 let (_, block_cache) = self.lru.peek_lru().unwrap();
                 if Arc::strong_count(block_cache) == 1 {
@@ -148,15 +151,17 @@ impl BlockCacheManager {
             )));
             // Add to the end of lru_cache and return
             self.lru.put(block_id, Arc::clone(&block_cache));
-            // TODO 是不是不用 clone
             Some(block_cache)
         }
     }
 
     pub fn clear(&mut self) {
+        for (_, block_cache) in self.lru.iter() {
+            block_cache.write().sync();
+        }
         // TODO
         // 是否需要考虑引用计数
-        self.lru.clear();
+        // self.lru.clear();
     }
 }
 
