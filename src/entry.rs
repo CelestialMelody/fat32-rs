@@ -521,7 +521,7 @@ impl ShortDirEntry {
 }
 
 impl ShortDirEntry {
-    fn empty() -> Self {
+    pub fn empty() -> Self {
         Self {
             name: [0; 8],
             extension: [0; 3],
@@ -539,11 +539,15 @@ impl ShortDirEntry {
         }
     }
 
-    fn root_dir(cluster: u32) -> Self {
+    pub fn root_dir(cluster: u32) -> Self {
         let mut item = Self::empty();
         item.set_first_cluster(cluster);
         item.attr = ATTR_DIRECTORY;
         item
+    }
+
+    pub fn set_name_case(&mut self, state: u8) {
+        self.nt_res = state;
     }
 
     // Get the start cluster number of the file
@@ -566,6 +570,10 @@ impl ShortDirEntry {
 
     pub fn is_deleted(&self) -> bool {
         self.name[0] == DIR_ENTRY_UNUSED
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.name[0] == DIR_ENTRY_LAST_AND_UNUSED
     }
 
     pub fn is_valid_name(&self) -> bool {
@@ -807,23 +815,24 @@ pub struct LongDirEntry {
 }
 
 impl LongDirEntry {
-    pub fn new_form_name_slice(order: u8, name_array: [u16; 13]) -> Self {
-        let mut long_ent = Self::empty();
+    pub fn new_form_name_slice(order: u8, name_array: [u16; 13], check_sum: u8) -> Self {
+        let mut lde = Self::empty();
 
         unsafe {
-            core::ptr::addr_of_mut!(long_ent.name1)
+            core::ptr::addr_of_mut!(lde.name1)
                 // try_into() 被用来尝试将 partial_name[..5] 转换成一个大小为 5 的固定大小数组
                 .write_unaligned(name_array[..5].try_into().expect("Failed to cast!"));
-            core::ptr::addr_of_mut!(long_ent.name2)
+            core::ptr::addr_of_mut!(lde.name2)
                 .write_unaligned(name_array[5..11].try_into().expect("Failed to cast!"));
-            core::ptr::addr_of_mut!(long_ent.name3)
+            core::ptr::addr_of_mut!(lde.name3)
                 .write_unaligned(name_array[11..].try_into().expect("Failed to cast!"));
         }
 
         debug_assert!(order < LAST_LONG_ENTRY);
-        long_ent.ord = order;
+        lde.ord = order;
+        lde.chk_sum = check_sum;
 
-        long_ent
+        lde
     }
 
     pub fn set_name(&mut self, name_array: [u16; 13]) {
@@ -838,7 +847,7 @@ impl LongDirEntry {
         }
     }
 
-    fn new(order: u8, check_sum: u8, name_str: &str) -> Self {
+    pub fn new(order: u8, check_sum: u8, name_str: &str) -> Self {
         let mut buf = [0; 32];
         buf[0x00] = order;
         buf[0x0B] = ATTR_LONG_NAME;
@@ -848,6 +857,16 @@ impl LongDirEntry {
     }
 
     pub fn name(&self) -> String {
+        let name_all = self.name_utf16();
+        let len = (0..name_all.len())
+            .find(|i| name_all[*i] == 0)
+            .unwrap_or(name_all.len());
+
+        // 从 UTF-16 编码的字节数组中解码出字符串
+        String::from_utf16_lossy(&name_all[..len])
+    }
+
+    pub fn name_utf16(&self) -> [u16; LONG_DIR_ENT_NAME_CAPACITY] {
         let mut name_all: [u16; LONG_DIR_ENT_NAME_CAPACITY] = [0u16; LONG_DIR_ENT_NAME_CAPACITY];
 
         name_all[..5].copy_from_slice(unsafe { &core::ptr::addr_of!(self.name1).read_unaligned() });
@@ -856,12 +875,7 @@ impl LongDirEntry {
         name_all[11..]
             .copy_from_slice(unsafe { &core::ptr::addr_of!(self.name3).read_unaligned() });
 
-        let len = (0..name_all.len())
-            .find(|i| name_all[*i] == 0)
-            .unwrap_or(name_all.len());
-
-        // 从 UTF-16 编码的字节数组中解码出字符串
-        String::from_utf16_lossy(&name_all[..len])
+        name_all
     }
 }
 
@@ -896,7 +910,11 @@ impl LongDirEntry {
     }
 
     pub fn is_free(&self) -> bool {
-        self.ord == 0x00 || self.ord == DIR_ENTRY_UNUSED
+        self.ord == DIR_ENTRY_LAST_AND_UNUSED || self.ord == DIR_ENTRY_UNUSED
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.ord == DIR_ENTRY_LAST_AND_UNUSED
     }
 
     pub fn is_valid(&self) -> bool {
@@ -998,33 +1016,33 @@ impl LongDirEntry {
     // file name of a long directory entry only has 13 unicode
     // characters. When the file name exceeds 13 characters,
     // multiple long directory entries are required.
-    fn lde_order(&self) -> usize {
+    pub fn lde_order(&self) -> usize {
         (self.ord & (LAST_LONG_ENTRY - 1)) as usize
     }
 
-    fn is_lde_end(&self) -> bool {
+    pub fn is_lde_end(&self) -> bool {
         (self.ord & LAST_LONG_ENTRY) == LAST_LONG_ENTRY
     }
 
-    fn as_bytes_array(&self) -> [u8; 32] {
+    pub fn as_bytes_array(&self) -> [u8; 32] {
         unsafe { core::ptr::read_unaligned(self as *const Self as *const [u8; 32]) }
     }
 
-    fn as_bytes_array_mut(&mut self) -> &mut [u8; 32] {
+    pub fn as_bytes_array_mut(&mut self) -> &mut [u8; 32] {
         unsafe { &mut *(self as *mut Self as *mut [u8; 32]) }
     }
 
-    fn to_bytes_array(&self) -> [u8; 32] {
+    pub fn to_bytes_array(&self) -> [u8; 32] {
         let mut buf = [0; 32];
         buf.copy_from_slice(self.as_bytes());
         buf
     }
 
-    fn as_bytes(&self) -> &[u8] {
+    pub fn as_bytes(&self) -> &[u8] {
         unsafe { core::slice::from_raw_parts(self as *const Self as *const u8, 32) }
     }
 
-    fn as_bytes_mut(&mut self) -> &mut [u8] {
+    pub fn as_bytes_mut(&mut self) -> &mut [u8] {
         unsafe { core::slice::from_raw_parts_mut(self as *mut Self as *mut u8, 32) }
     }
 }

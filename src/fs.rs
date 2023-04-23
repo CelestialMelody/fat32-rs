@@ -1,7 +1,5 @@
-use alloc::string::String;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
-use core::fmt::{self, Debug, Formatter};
 use spin::RwLock;
 
 use crate::bpb::{BIOSParameterBlock, FSInfo};
@@ -13,10 +11,10 @@ use crate::VirFileType;
 use crate::{BLOCK_SIZE, FREE_CLUSTER, ROOT, STRAT_CLUSTER_IN_FAT};
 
 pub struct FileSystem {
-    device: Arc<dyn BlockDevice>,
-    free_cluster_cnt: Arc<RwLock<usize>>, // TODO Arc needed?
-    bpb: BIOSParameterBlock,              // read only
-    fat: Arc<RwLock<FATManager>>,
+    pub(crate) device: Arc<dyn BlockDevice>,
+    pub(crate) free_cluster_cnt: Arc<RwLock<usize>>, // TODO Arc needed?
+    pub(crate) bpb: BIOSParameterBlock,              // read only
+    pub(crate) fat: Arc<RwLock<FATManager>>,
 }
 
 impl FileSystem {
@@ -119,7 +117,7 @@ impl FileSystem {
     }
 
     // 成功返回第一个簇号，失败返回None
-    pub fn alloc_cluster(&self, num: usize) -> Option<usize> {
+    pub fn alloc_cluster(&self, num: usize) -> Option<u32> {
         let free_cluster_cnt = self.free_cluster_cnt();
         if free_cluster_cnt < num {
             return None;
@@ -148,7 +146,7 @@ impl FileSystem {
             .write()
             .set_next_cluster(curr_cluster_id, 0x0FFFFFFF);
         self.set_free_clusters(free_cluster_cnt - num);
-        Some(first_cluster_id as usize)
+        Some(first_cluster_id)
     }
 
     pub fn dealloc_cluster(&self, clusters: Vec<u32>) {
@@ -159,6 +157,7 @@ impl FileSystem {
         let free_cluster_cnt = self.free_cluster_cnt();
         for i in 0..num {
             self.fat.write().set_next_cluster(clusters[i], FREE_CLUSTER);
+            self.fat.write().recycle(clusters[i]);
         }
         self.set_free_clusters(free_cluster_cnt + num);
     }

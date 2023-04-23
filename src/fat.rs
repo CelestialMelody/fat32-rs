@@ -1,22 +1,21 @@
-#![allow(unused)]
+//! 当前代码实现规定
+//! 从数据区开始 对 cluster 进行编号, 从 2 开始
+//! 计算偏移 offset = BLOCK_SIZE * (bpb.first_data_sector + (cluster - 2) * bpb.sector_per_cluster)
+//! 关于块/扇区/簇的变量命名: 默认以 _id 结尾的变量为在存储介质从 0 开始编号, 如 block_id
+//! cluster 为从数据区开始的簇号, 从 2 开始编号, 其他命名尽量容易理解 如 block_id_in_cluster 为簇内块号
 
 use crate::cache::get_block_cache;
 use crate::cache::Cache;
 use crate::device::BlockDevice;
 use crate::read_le_u32;
-use crate::BlockDeviceError;
-use crate::BAD_CLUSTER;
 use crate::BLOCK_SIZE;
 use crate::END_OF_CLUSTER;
-use crate::FAT_BUFFER_SIZE;
+use crate::STRAT_CLUSTER_IN_FAT;
 
 use alloc::collections::VecDeque;
-use lazy_static::*;
-
 use alloc::sync::Arc;
 use alloc::vec::Vec;
 use core::fmt::Debug;
-use spin::RwLock;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ClusterChainErr {
@@ -198,7 +197,7 @@ impl FATManager {
         // TODO
         // Q: 应该从 0 开始吗? 从 2 开始?
         // A: (数据区) 从 0 开始; (磁盘上) 从 first_data_sector 开始
-        let mut cluster = 0;
+        let mut cluster = STRAT_CLUSTER_IN_FAT;
         let mut done = false;
         let mut buffer = [0u8; BLOCK_SIZE];
 
@@ -306,8 +305,8 @@ impl FATManager {
         assert!(curr_cluster >= 2);
         loop {
             let option = self.get_next_cluster(curr_cluster);
-            if let Some(c) = option {
-                curr_cluster = c
+            if let Some(cluster) = option {
+                curr_cluster = cluster
             } else {
                 return curr_cluster & END_OF_CLUSTER;
             }

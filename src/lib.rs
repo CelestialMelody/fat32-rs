@@ -2,17 +2,15 @@
 pub mod bpb;
 pub mod cache;
 pub mod device;
-pub mod dir;
 pub mod entry;
 pub mod fat;
-pub mod file;
 pub mod fs;
 pub mod vfs;
 
-use crate::dir::DirError;
+// use crate::dir::DirError;
 use crate::entry::NameType;
 use crate::fat::ClusterChainErr;
-use crate::file::FileError;
+// use crate::file::FileError;
 
 use core::convert::TryInto;
 use core::str;
@@ -50,7 +48,13 @@ pub const ATTR_LONG_NAME: u8 = ATTR_READ_ONLY | ATTR_HIDDEN | ATTR_SYSTEM | ATTR
 pub const DIRENT_SIZE: usize = 32;
 pub const LONG_NAME_LEN: u32 = 13;
 pub const STRAT_CLUSTER_IN_FAT: u32 = 2;
+pub const NEW_VIR_FILE_CLUSTER: u32 = 0;
 pub const BLOCK_CACHE_LIMIT: usize = 64;
+
+// Name Status for Short Directory Entry
+pub const ALL_UPPER_CASE: u8 = 0x00;
+pub const ALL_LOWER_CASE: u8 = 0x08;
+pub const ORIGINAL: u8 = 0x0F;
 
 // Charactor
 pub const SPACE: u8 = 0x20;
@@ -103,14 +107,15 @@ type Error = BlockDeviceError;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BlockDeviceError {
     ClusterChain(ClusterChainErr),
-    Dir(DirError),
-    File(FileError),
+    // Dir(DirError),
+    // File(FileError),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
 pub enum VirFileType {
-    Dir,
-    File,
+    Dir = ATTR_DIRECTORY,
+    File = ATTR_ARCHIVE,
 }
 
 pub(crate) fn read_le_u16(input: &[u8]) -> u16 {
