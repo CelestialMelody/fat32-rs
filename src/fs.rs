@@ -2,7 +2,7 @@ use alloc::sync::Arc;
 use alloc::vec::Vec;
 use spin::RwLock;
 
-use crate::bpb::{BIOSParameterBlock, FSInfo};
+use crate::bpb::{BIOSParameterBlock, BasicBPB, FSInfo, BPB32};
 use crate::cache::{get_block_cache, Cache};
 use crate::device::BlockDevice;
 use crate::entry::{Entry, EntryType, ShortDirEntry};
@@ -60,16 +60,11 @@ impl FileSystem {
         self.first_data_sector()
     }
 
-    pub fn root_entry(&self) -> Entry {
+    pub fn root_entry() -> ShortDirEntry {
         let mut name_bytes = [0x20u8; 11];
         name_bytes[0] = ROOT;
-        let root =
-            ShortDirEntry::new_from_name_bytes(STRAT_CLUSTER_IN_FAT, &name_bytes, VirFileType::Dir);
-        Entry {
-            item_type: EntryType::Dir,
-            sde: Some(root),
-            lde: None,
-        }
+
+        ShortDirEntry::new_from_name_bytes(STRAT_CLUSTER_IN_FAT, &name_bytes, VirFileType::Dir)
     }
 
     pub fn open(device: Arc<dyn BlockDevice>) -> Arc<RwLock<Self>> {
@@ -88,6 +83,69 @@ impl FileSystem {
                 );
                 fsinfo.free_cluster_cnt() as usize
             });
+
+        let fat = FATManager::new(bpb.fat1_offset(), Arc::clone(&device));
+
+        Arc::new(RwLock::new(Self {
+            device,
+            free_cluster_cnt: Arc::new(RwLock::new(free_cluster_cnt)),
+            bpb,
+            fat: Arc::new(RwLock::new(fat)),
+        }))
+    }
+
+    pub fn create(device: Arc<dyn BlockDevice>) -> Arc<RwLock<Self>> {
+        let basic_bpb = BasicBPB {
+            bs_jmp_boot: [0xEB, 0x58, 0x90],
+            bs_oem_name: *b"mk.fat32",
+            byts_per_sec: BLOCK_SIZE as u16,
+            sec_per_clus: 8,
+            rsvd_sec_cnt: 32,
+            num_fats: 2,
+            root_ent_cnt: 0,
+            tot_sec16: 0,
+            media: 0xF8,
+            fat_sz16: 0,
+            sec_per_trk: 0,
+            num_heads: 0,
+            hidd_sec: 0,
+            tot_sec32: 0x4000 as u32,
+        };
+        let bpb32 = BPB32 {
+            fat_sz32: 64,
+            ext_flags: 0,
+            fs_ver: 0,
+            root_clus: 2,
+            fs_info: 1,
+            bk_boot_sec: 6,
+            reserved: [0u8; 12],
+            bs_drv_num: 0x80,
+            bs_reserved1: 0,
+            bs_boot_sig: 0x29,
+            bs_vol_id: 0x12345678,
+            bs_vol_lab: *b"mkfs.fat32 ",
+            bs_fil_sys_type: *b"FAT32   ",
+        };
+        let bpb = BIOSParameterBlock { basic_bpb, bpb32 };
+        get_block_cache(0, Arc::clone(&device))
+            .unwrap()
+            .write()
+            .modify(0, |b: &mut BIOSParameterBlock| *b = bpb);
+
+        let fsinfo = FSInfo {
+            lead_sig: 0x41615252,
+            reserved1: [0u8; 480],
+            struc_sig: 0x61417272,
+            free_count: 0x4000 as u32 - 32 - 128 - 128, // TODO
+            nxt_free: 0xFFFFFFFF,
+            reserved2: [0u8; 12],
+            trail_sig: 0xAA550000,
+        };
+        let free_cluster_cnt = fsinfo.free_cluster_cnt() as usize;
+        get_block_cache(1, Arc::clone(&device))
+            .unwrap()
+            .write()
+            .modify(0, |f: &mut FSInfo| *f = fsinfo);
 
         let fat = FATManager::new(bpb.fat1_offset(), Arc::clone(&device));
 
