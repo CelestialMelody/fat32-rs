@@ -202,22 +202,22 @@ impl FileSystem {
     }
 
     // 成功返回第一个簇号，失败返回None
-    pub fn alloc_cluster(&self, num: usize) -> Option<u32> {
+    pub fn alloc_cluster(&self, num: usize, start_cluster: u32) -> Option<u32> {
         let free_cluster_cnt = self.free_cluster_cnt();
         if free_cluster_cnt < num {
             return None;
         }
 
-        let first_cluster_id = self.fat.write().blank_cluster();
-        self.clear_cluster(first_cluster_id);
+        let first_cluster_id = self.fat.write().blank_cluster(start_cluster);
+
         assert!(first_cluster_id >= 2);
+        self.clear_cluster(first_cluster_id);
 
         let mut curr_cluster_id = first_cluster_id;
         for _ in 1..num {
-            let cluster_id = self.fat.write().blank_cluster();
-            self.clear_cluster(cluster_id);
+            let cluster_id = self.fat.write().blank_cluster(curr_cluster_id);
             assert!(cluster_id >= 2);
-
+            self.clear_cluster(cluster_id);
             self.fat
                 .write()
                 .set_next_cluster(curr_cluster_id, cluster_id);
@@ -226,11 +226,13 @@ impl FileSystem {
         }
 
         // TODO 是否维护 fsinfo next_free_cluster
-        self.clear_cluster(curr_cluster_id);
+        // self.clear_cluster(curr_cluster_id);
         self.fat
             .write()
-            .set_next_cluster(curr_cluster_id, 0x0FFFFFFF);
+            .set_next_cluster(curr_cluster_id, END_OF_CLUSTER);
+
         self.set_free_clusters(free_cluster_cnt - num);
+
         Some(first_cluster_id)
     }
 
