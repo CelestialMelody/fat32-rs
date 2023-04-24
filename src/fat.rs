@@ -1,7 +1,7 @@
 //! 当前代码实现规定
 //! 从数据区开始 对 cluster 进行编号, 从 2 开始
 //! 计算偏移 offset = BLOCK_SIZE * (bpb.first_data_sector + (cluster - 2) * bpb.sector_per_cluster)
-//! 关于块/扇区/簇的变量命名: 默认以 _id 结尾的变量为在存储介质从 0 开始编号, 如 block_id
+//! 关于块/扇区/簇的变量命名:  block_id 在存储介质从 0 开始 从 0 编号, cluster_id 为从 数据区开始从 2 开始的簇号
 //! cluster 为从数据区开始的簇号, 从 2 开始编号, 其他命名尽量容易理解 如 block_id_in_cluster 为簇内块号
 
 use crate::cache::get_block_cache;
@@ -167,12 +167,34 @@ pub struct FATManager {
 }
 
 impl FATManager {
-    pub fn new(fat_offset: usize, device: Arc<dyn BlockDevice>) -> Self {
+    pub fn open(fat_offset: usize, device: Arc<dyn BlockDevice>) -> Self {
         Self {
             device: Arc::clone(&device),
             recycled_cluster: VecDeque::new(),
             fat1_offset: fat_offset,
         }
+    }
+
+    pub fn new(fat_offset: usize, device: Arc<dyn BlockDevice>) -> Self {
+        let fat = Self {
+            device: Arc::clone(&device),
+            recycled_cluster: VecDeque::new(),
+            fat1_offset: fat_offset,
+        };
+
+        // fix: init fat table: 由于簇号从 2 开始, 现在将簇号 0, 1 的内容填充方便找到正确的簇(防止误操作)
+        let block_id = fat.fat1_offset / BLOCK_SIZE;
+
+        assert!(fat.fat1_offset % BLOCK_SIZE == 0);
+        get_block_cache(block_id, Arc::clone(&device))
+            .unwrap()
+            .write()
+            .modify(0, |buf: &mut [u32; 2]| {
+                buf[0] = END_OF_CLUSTER;
+                buf[1] = END_OF_CLUSTER;
+            });
+
+        fat
     }
 
     // 给出 FAT 表的下标(clsuter_id_in_fat数据区簇号), 返回这个下标 (fat表的) 相对于磁盘的扇区数 (block_id) 与扇区内偏移
