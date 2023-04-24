@@ -10,7 +10,6 @@ use crate::device::BlockDevice;
 use crate::read_le_u32;
 use crate::BLOCK_SIZE;
 use crate::END_OF_CLUSTER;
-use crate::STRAT_CLUSTER_IN_FAT;
 
 use alloc::collections::VecDeque;
 use alloc::sync::Arc;
