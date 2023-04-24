@@ -174,7 +174,7 @@
 // 2. FAT1 起始地址 = 保留扇区数 * 扇区大小
 // 3. 文件分配表区共保存了两个相同的文件分配表, 因为文件所占用的存储空间 (簇链) 及空闲空间的管理都是通过FAT实现的, 保存两个以便第一个损坏时, 还有第二个可用
 
-use crate::{
+use super::{
     LEAD_SIGNATURE, MAX_CLUSTER_FAT12, MAX_CLUSTER_FAT16, STRUCT_SIGNATURE, TRAIL_SIGNATURE,
 };
 
@@ -185,8 +185,8 @@ use crate::{
 // 使用 #[repr(packed)] 属性可能会导致访问未对齐的内存，这可能会导致不可预测的结果，例如内存访问异常、程序崩溃等
 #[repr(packed)]
 pub struct BIOSParameterBlock {
-    pub(crate) bpb: BasicBPB, // size = 36B
-    pub(crate) bpb32: BPB32,  // size = 54B
+    pub(crate) basic_bpb: BasicBPB, // size = 36B
+    pub(crate) bpb32: BPB32,        // size = 54B
 }
 
 /// We intend to realize fat32, so we don't need to care about fat12 and fat16.
@@ -204,10 +204,10 @@ impl BIOSParameterBlock {
     pub fn offset(&self, cluster: u32) -> usize {
         // Q: why cluster - 2?
         // A: The first two clusters are reserved and the first data cluster is 2.
-        ((self.bpb.rsvd_sec_cnt as usize)
-            + (self.bpb.num_fats as usize) * (self.bpb32.fat_sz32 as usize)
-            + (cluster as usize - 2) * (self.bpb.sec_per_clus as usize))
-            * (self.bpb.byts_per_sec as usize)
+        ((self.basic_bpb.rsvd_sec_cnt as usize)
+            + (self.basic_bpb.num_fats as usize) * (self.bpb32.fat_sz32 as usize)
+            + (cluster as usize - 2) * (self.basic_bpb.sec_per_clus as usize))
+            * (self.basic_bpb.byts_per_sec as usize)
         // (self.first_data_sector() + (cluster as usize - 2) * (self.bpb.sec_per_clus as usize))
         //     * (self.bpb.byts_per_sec as usize)
     }
@@ -227,8 +227,8 @@ impl BIOSParameterBlock {
         //     + (self.bpb.num_fats as usize) * fat_sz
         //     + self.root_dir_sector_cnt()
 
-        (self.bpb.rsvd_sec_cnt as usize)
-            + (self.bpb.num_fats as usize) * self.bpb32.fat_sz32 as usize
+        (self.basic_bpb.rsvd_sec_cnt as usize)
+            + (self.basic_bpb.num_fats as usize) * self.bpb32.fat_sz32 as usize
             + self.root_dir_sector_cnt()
     }
 
@@ -236,28 +236,28 @@ impl BIOSParameterBlock {
     /// Given any valid data cluster number N, the sector number of the first sector of that cluster
     /// (again relative to sector 0 of the FAT volume) is computed as follows.
     pub fn first_sector_of_cluster(&self, cluster: u32) -> usize {
-        self.first_data_sector() + (cluster as usize - 2) * self.bpb.sec_per_clus as usize
+        self.first_data_sector() + (cluster as usize - 2) * self.basic_bpb.sec_per_clus as usize
     }
 
     #[inline(always)]
     /// Get FAT1 Offset
     pub fn fat1_offset(&self) -> usize {
-        (self.bpb.rsvd_sec_cnt as usize) * (self.bpb.byts_per_sec as usize)
+        (self.basic_bpb.rsvd_sec_cnt as usize) * (self.basic_bpb.byts_per_sec as usize)
     }
 
     pub fn fat1_sector_id(&self) -> usize {
-        self.bpb.rsvd_sec_cnt as usize
+        self.basic_bpb.rsvd_sec_cnt as usize
     }
 
     #[inline(always)]
     /// Get FAT2 Offset
     pub fn fat2_offset(&self) -> usize {
-        self.fat1_offset() + (self.bpb32.fat_sz32 as usize) * (self.bpb.byts_per_sec as usize)
+        self.fat1_offset() + (self.bpb32.fat_sz32 as usize) * (self.basic_bpb.byts_per_sec as usize)
     }
 
     /// Get sector_per_cluster_usize as usize value
     pub fn sector_per_cluster(&self) -> usize {
-        self.bpb.sec_per_clus as usize
+        self.basic_bpb.sec_per_clus as usize
     }
 
     #[inline(always)]
@@ -268,8 +268,8 @@ impl BIOSParameterBlock {
     /// The 32 in the above is the size of one FAT directory entry in bytes.
     /// Note also that this computation rounds up
     pub fn root_dir_sector_cnt(&self) -> usize {
-        ((self.bpb.root_ent_cnt * 32) as usize + (self.bpb.byts_per_sec - 1) as usize)
-            / self.bpb.byts_per_sec as usize
+        ((self.basic_bpb.root_ent_cnt * 32) as usize + (self.basic_bpb.byts_per_sec - 1) as usize)
+            / self.basic_bpb.byts_per_sec as usize
     }
 
     #[inline(always)]
@@ -292,9 +292,9 @@ impl BIOSParameterBlock {
         //     - (self.bpb.num_fats as usize) * fat_sz
         //     - self.root_dir_sector_cnt()
 
-        self.bpb.tot_sec32 as usize
-            - (self.bpb.rsvd_sec_cnt as usize)
-            - (self.bpb.num_fats as usize) * (self.bpb32.fat_sz32 as usize)
+        self.basic_bpb.tot_sec32 as usize
+            - (self.basic_bpb.rsvd_sec_cnt as usize)
+            - (self.basic_bpb.num_fats as usize) * (self.bpb32.fat_sz32 as usize)
             - self.root_dir_sector_cnt()
     }
 
@@ -303,26 +303,26 @@ impl BIOSParameterBlock {
     /// This function should round DOWN.
     #[inline(always)]
     pub fn data_cluster_cnt(&self) -> usize {
-        self.data_sector_cnt() / (self.bpb.sec_per_clus as usize)
+        self.data_sector_cnt() / (self.basic_bpb.sec_per_clus as usize)
     }
 
     #[inline(always)]
     /// The total size of the data region
     pub fn total_data_volume(&self) -> usize {
-        self.data_sector_cnt() * self.bpb.byts_per_sec as usize
+        self.data_sector_cnt() * self.basic_bpb.byts_per_sec as usize
     }
 
     pub fn is_valid(&self) -> bool {
-        self.bpb.root_ent_cnt == 0
-            && self.bpb.tot_sec16 == 0
-            && self.bpb.tot_sec32 != 0
-            && self.bpb.fat_sz16 == 0
+        self.basic_bpb.root_ent_cnt == 0
+            && self.basic_bpb.tot_sec16 == 0
+            && self.basic_bpb.tot_sec32 != 0
+            && self.basic_bpb.fat_sz16 == 0
             && self.bpb32.fat_sz32 != 0
     }
 
     #[inline(always)]
     pub fn cluster_size(&self) -> usize {
-        self.bpb.sec_per_clus as usize * self.bpb.byts_per_sec as usize
+        self.basic_bpb.sec_per_clus as usize * self.basic_bpb.byts_per_sec as usize
     }
 
     pub fn fat_type(&self) -> FatType {
@@ -336,23 +336,23 @@ impl BIOSParameterBlock {
     }
 
     pub fn bytes_per_sector(&self) -> usize {
-        self.bpb.byts_per_sec as usize
+        self.basic_bpb.byts_per_sec as usize
     }
 
     pub fn sectors_per_cluster(&self) -> usize {
-        self.bpb.sec_per_clus as usize
+        self.basic_bpb.sec_per_clus as usize
     }
 
     pub fn fat_cnt(&self) -> usize {
-        self.bpb.num_fats as usize
+        self.basic_bpb.num_fats as usize
     }
 
     pub fn reserved_sector_cnt(&self) -> usize {
-        self.bpb.rsvd_sec_cnt as usize
+        self.basic_bpb.rsvd_sec_cnt as usize
     }
 
     pub fn total_sector_cnt(&self) -> usize {
-        self.bpb.tot_sec32 as usize
+        self.basic_bpb.tot_sec32 as usize
     }
 
     pub fn sector_pre_fat(&self) -> usize {
@@ -518,7 +518,7 @@ pub struct BPB32 {
     /// FAT size (for FAT32)    Size: 4 bytes    Value: non-zero    Offset: 0x24
     //
     // 每个FAT扇区数 (给FAT32使用)    大小: 4字节    值: non-zero  偏移: 0x24
-    fat_sz32: u32,
+    pub(crate) fat_sz32: u32,
     /// This field is only defined for FAT32 media and does not exist on
     /// FAT12 and FAT16 media.
     /// Bits 0-3    -- Zero-based number of active FAT. Only valid if mirroring
@@ -532,7 +532,7 @@ pub struct BPB32 {
     /// Extended flags    Size: 2 bytes    Value: 0 (0x00)    Offset: 0x28
     //
     // 扩展标志    大小: 2字节    值: ???    偏移: 0x28
-    ext_flags: u16,
+    pub(crate) ext_flags: u16,
     /// This is the version number of the FAT32 volume.
     /// This field is only defined for FAT32 media. High byte is major
     /// revision number. Low byte is minor revision number.
@@ -545,21 +545,21 @@ pub struct BPB32 {
     /// File system version (always 0)    Size: 2 bytes    Value: 0x0000 (0x0000)    Offset: 0x2A
     //
     //  文件系统版本 (通常为零)    大小: 2字节    值: 0x0000 (0x0000)   偏移: 0x2A
-    fs_ver: u16,
+    pub(crate) fs_ver: u16,
     /// This is set to the cluster number of the first cluster of the root
     /// directory, usually 2 but not required to be 2.
     ///
     /// Root directory first cluster (always 2)    Size: 4 bytes    Value: 2 (0x02)    Offset: 0x2C
     //
     //  根目录起始簇号    大小: 4字节    值: 2 (0x02)    偏移: 0x2C
-    root_clus: u32,
+    pub(crate) root_clus: u32,
     /// Sector number of FSINFO structure in the reserved area of
     /// the FAT32 volume. Usually 1.
     ///
     /// FSINFO sector (always 1)    Size: 2 bytes    Value: 1 (0x01)    Offset: 0x30
     //
     //  FSINFO 扇区号 (Boot占用扇区数)    大小: 2字节    值: 1 (0x01)   偏移: 0x30
-    fs_info: u16,
+    pub(crate) fs_info: u16,
     /// The sector number in the reserved area of the volume of
     /// a copy of the boot record. Usually 6.
     /// The case—sector 0 goes bad—is the reason why no value other than 6 should ever be placed
@@ -573,12 +573,12 @@ pub struct BPB32 {
     /// Backup boot sector (always 6)    Size: 2 bytes    Value: 6 (0x06)    Offset: 0x32
     //
     //  备份引导扇区扇区号    大小: 2字节    值: 6 (0x06)   偏移: 0x32
-    bk_boot_sec: u16,
+    pub(crate) bk_boot_sec: u16,
     /// Reserved for future expansion. Code that formats FAT32 volumes
     /// should always set all of the bytes of this field to 0.
     //
     //  保留区    大小: 12字节    值: 0 (0x00)    偏移: 0x34
-    reserved: [u8; 12],
+    pub(crate) reserved: [u8; 12],
     //  以下 26B 与 FAT12/16 的 BPB 完全相同, 但是偏移不同
     //
     /// This field is the physical drive number for the INT 13h.
@@ -589,13 +589,13 @@ pub struct BPB32 {
     /// Physical drive number    Size: 1 byte    Value: 0x80    Offset: 0x40
     //
     //  物理驱动器号    大小: 1字节    值: 0x80    偏移: 0x40
-    bs_drv_num: u8,
+    pub(crate) bs_drv_num: u8,
     /// This field is no longer used and should always be set to 0.
     ///
     /// Reserved (used by Windows NT)    Size: 1 byte    Value: 0 (0x00)    Offset: 0x41
     //
     //  保留区    大小: 1字节    值: 0 (0x00)    偏移: 0x41
-    bs_reserved1: u8,
+    pub(crate) bs_reserved1: u8,
     /// This field is the extended boot signature. This field is set to 0x29.
     /// This is a signature byte that indicates that the following three fields
     /// in the boot sector are present. (BS_VolID, BS_VolLab, BS_FilSysType)
@@ -603,7 +603,7 @@ pub struct BPB32 {
     /// Extended boot signature    Size: 1 byte    Value: 0x29 (0x29)    Offset: 0x42
     //
     //  扩展引导标记    大小: 1字节    值: 0x29 (0x29)   偏移: 0x42
-    bs_boot_sig: u8,
+    pub(crate) bs_boot_sig: u8,
     /// Volume serial number. This field, together with BS_VolLab,
     /// supports volume tracking on removable media. These values allow
     /// FAT file system drivers to detect that the wrong disk is inserted in a
@@ -613,7 +613,7 @@ pub struct BPB32 {
     /// Volume serial number    Size: 4 bytes    Value: ???    Offset: 0x43
     //
     //  卷序列号    大小: 4字节    值: ???    偏移: 0x43
-    bs_vol_id: u32,
+    pub(crate) bs_vol_id: u32,
     /// Volume label. This field matches the 11-byte volume label recorded in
     /// the root directory.
     /// NOTE: FAT file system drivers should make sure that they update
@@ -624,7 +624,7 @@ pub struct BPB32 {
     /// Volume label    Size: 11 bytes    Value: ???    Offset: 0x47
     //
     //  卷标    大小: 11字节    值: ???    偏移: 0x47
-    bs_vol_lab: [u8; 11],
+    pub(crate) bs_vol_lab: [u8; 11],
     /// File system type.
     /// This string is informational only and is not used by Microsoft
     /// file system drivers to determine FAT typ,e because it is frequently
@@ -633,7 +633,7 @@ pub struct BPB32 {
     /// File system type    Size: 8 bytes    Value: "FAT32   "    Offset: 0x52
     //
     //  文件系统类型    大小: 8字节    值: "FAT32   "    偏移: 0x52
-    bs_fil_sys_type: [u8; 8],
+    pub(crate) bs_fil_sys_type: [u8; 8],
 }
 
 impl BPB32 {

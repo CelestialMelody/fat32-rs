@@ -189,8 +189,8 @@
 //! FAT Long Directory Entries
 //!
 
-use crate::VirFileType;
-use crate::{
+use super::VirFileType;
+use super::{
     ATTR_ARCHIVE, ATTR_DIRECTORY, ATTR_HIDDEN, ATTR_LONG_NAME, ATTR_READ_ONLY, ATTR_SYSTEM,
     ATTR_VOLUME_ID, DIR_ENTRY_LAST_AND_UNUSED, DIR_ENTRY_UNUSED, LAST_LONG_ENTRY,
     LONG_DIR_ENT_NAME_CAPACITY, SPACE,
