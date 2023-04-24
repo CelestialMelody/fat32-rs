@@ -214,19 +214,27 @@ impl FATManager {
     }
 
     // 从FAT表中找到空闲的簇
-    fn find_blank_cluster(&self) -> u32 {
-        // TODO
-        // Q: 应该从 0 开始吗? 从 2 开始?
-        // A: (数据区) 从 0 开始; (磁盘上) 从 first_data_sector 开始
-        let mut cluster = STRAT_CLUSTER_IN_FAT;
+    // fix: 从 start_from 开始找, 提高查找效率
+    fn find_blank_cluster(&self, start_from: u32) -> u32 {
+        // 加 1 过滤已经分配的簇号 (该簇号还未初始值为EOC, 防止找到同样的簇号)
+        let mut cluster = start_from + 1;
         let mut done = false;
         let mut buffer = [0u8; BLOCK_SIZE];
 
-        for block in 0.. {
-            self.device
-                .read_blocks(&mut buffer, self.fat1_offset + block * BLOCK_SIZE, 1)
-                .unwrap();
-            for i in (0..BLOCK_SIZE).step_by(4) {
+        // fix 修改查询方式
+        loop {
+            let (block_id, offset) = self.cluster_id_pos(cluster);
+            let option = get_block_cache(block_id, Arc::clone(&self.device));
+            if let Some(block) = option {
+                block.read().read(0, |buf: &[u8; BLOCK_SIZE]| {
+                    buffer.copy_from_slice(buf);
+                })
+            } else {
+                self.device
+                    .read_blocks(&mut buffer, block_id * BLOCK_SIZE, 1)
+                    .unwrap();
+            }
+            for i in (offset..BLOCK_SIZE).step_by(4) {
                 if read_le_u32(&buffer[i..i + 4]) == 0 {
                     done = true;
                     break;
@@ -241,11 +249,11 @@ impl FATManager {
         cluster & END_OF_CLUSTER
     }
 
-    pub fn blank_cluster(&mut self) -> u32 {
+    pub fn blank_cluster(&mut self, start_from: u32) -> u32 {
         if let Some(cluster) = self.recycled_cluster.pop_front() {
             cluster & END_OF_CLUSTER
         } else {
-            self.find_blank_cluster()
+            self.find_blank_cluster(start_from)
         }
     }
 
