@@ -619,15 +619,21 @@ impl VirFile {
 
     pub fn find_by_sfn(&self, name: &str) -> Option<VirFile> {
         let name = name.to_ascii_uppercase();
+
         let mut sde = ShortDirEntry::empty();
         let mut index = 0;
         let dir_size = self.file_size();
+
         loop {
-            if index + DIRENT_SIZE > dir_size {
+            // fix
+            if index > dir_size {
                 return None;
             }
+
             let read_size = self.read_at(index, sde.as_bytes_mut());
-            if read_size != DIRENT_SIZE || sde.is_free() {
+
+            // fix: do not sde.is_free() of sde.is_deleted()
+            if read_size != DIRENT_SIZE {
                 return None;
             } else {
                 // 判断名字是否一样
@@ -713,10 +719,26 @@ impl VirFile {
         }
     }
 
+    pub fn vir_file_type(&self) -> VirFileType {
+        if self.is_dir() {
+            VirFileType::Dir
+        } else {
+            VirFileType::File
+        }
+    }
+
     // Dir Functions
     pub fn create(&self, name: &str, file_type: VirFileType) -> Option<VirFile> {
         // 检测同名文件
         assert!(self.is_dir());
+        // fix: add
+        let option = self.find_by_name(name);
+        if let Some(file) = option {
+            if file.vir_file_type() == file_type {
+                // 改 result 处理
+                return None;
+            }
+        }
         let (name_, ext_) = split_name_ext(name);
         // 搜索空处
         let mut entry_offset: usize;
@@ -768,6 +790,7 @@ impl VirFile {
             sde = ShortDirEntry::new(NEW_VIR_FILE_CLUSTER, &_name, &_ext, file_type);
             sde.set_name_case(ORIGINAL);
         }
+
         // 写短目录项（长文件名也是有短文件名目录项的）
         let wirte_size = self.write_at(entry_offset, sde.as_bytes());
         assert_eq!(wirte_size, DIRENT_SIZE);
@@ -784,6 +807,10 @@ impl VirFile {
                     &_ext,
                     VirFileType::Dir,
                 );
+
+                // fix: 注意文件大小的更新, 否则返回上级目录没法读
+                let parent_file_size = self.file_size();
+                parent_sde.set_file_size(parent_file_size as u32);
                 file.write_at(DIRENT_SIZE, parent_sde.as_bytes_mut());
 
                 let (_name, _ext) = short_name_format(".");
