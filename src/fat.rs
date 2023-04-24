@@ -206,8 +206,7 @@ impl FATManager {
         // ThisFATSecNum = BPB_ResvdSecCnt + (FATOffset / BPB_BytsPerSec);
         // ThisFATEntOffset = REM(FATOffset / BPB_BytsPerSec);
         //
-        // TODO -2? 不需要: 对 fat 表操作
-        assert!(index >= 2);
+        // fix: 不需要 >= 2; fs::open 时对 fat_manager 预处理了 2. 新建文件的 cluster_id = 0 会 panic
         let offset = index as usize * 4 + self.fat1_offset;
         let block_id = offset / BLOCK_SIZE;
         let offset_in_block = offset % BLOCK_SIZE;
