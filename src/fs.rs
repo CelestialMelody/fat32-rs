@@ -2,13 +2,16 @@ use alloc::sync::Arc;
 use alloc::vec::Vec;
 use spin::RwLock;
 
-use crate::bpb::{BIOSParameterBlock, BasicBPB, FSInfo, BPB32};
-use crate::cache::{get_block_cache, Cache};
-use crate::device::BlockDevice;
-use crate::entry::{Entry, EntryType, ShortDirEntry};
-use crate::fat::FATManager;
-use crate::VirFileType;
-use crate::{BLOCK_SIZE, FREE_CLUSTER, ROOT, STRAT_CLUSTER_IN_FAT};
+use super::bpb::{BIOSParameterBlock, BasicBPB, FSInfo, BPB32};
+use super::cache::{get_block_cache, Cache};
+use super::device::BlockDevice;
+use super::entry::ShortDirEntry;
+use super::fat::FATManager;
+use super::VirFileType;
+use super::{
+    BLOCK_NUM, BLOCK_SIZE, END_OF_CLUSTER, FREE_CLUSTER, ROOT, ROOT_DIR_ENTRY_CLUSTER,
+    STRAT_CLUSTER_IN_FAT,
+};
 
 pub struct FileSystem {
     pub(crate) device: Arc<dyn BlockDevice>,
@@ -67,33 +70,6 @@ impl FileSystem {
         ShortDirEntry::new_from_name_bytes(STRAT_CLUSTER_IN_FAT, &name_bytes, VirFileType::Dir)
     }
 
-    pub fn open(device: Arc<dyn BlockDevice>) -> Arc<RwLock<Self>> {
-        let bpb = get_block_cache(0, Arc::clone(&device))
-            .unwrap()
-            .read()
-            .read(0, |bpb: &BIOSParameterBlock| *bpb);
-
-        let free_cluster_cnt = get_block_cache(bpb.fat_info_sector(), Arc::clone(&device))
-            .unwrap()
-            .read()
-            .read(0, |fsinfo: &FSInfo| {
-                assert!(
-                    fsinfo.check_signature(),
-                    "Error loading fat32! Illegal signature"
-                );
-                fsinfo.free_cluster_cnt() as usize
-            });
-
-        let fat = FATManager::new(bpb.fat1_offset(), Arc::clone(&device));
-
-        Arc::new(RwLock::new(Self {
-            device,
-            free_cluster_cnt: Arc::new(RwLock::new(free_cluster_cnt)),
-            bpb,
-            fat: Arc::new(RwLock::new(fat)),
-        }))
-    }
-
     pub fn create(device: Arc<dyn BlockDevice>) -> Arc<RwLock<Self>> {
         let basic_bpb = BasicBPB {
             bs_jmp_boot: [0xEB, 0x58, 0x90],
@@ -136,7 +112,7 @@ impl FileSystem {
             lead_sig: 0x41615252,
             reserved1: [0u8; 480],
             struc_sig: 0x61417272,
-            free_count: 0x4000 as u32 - 32 - 128 - 128, // TODO
+            free_count: BLOCK_NUM as u32 - 32 - 128 - 128,
             nxt_free: 0xFFFFFFFF,
             reserved2: [0u8; 12],
             trail_sig: 0xAA550000,
@@ -148,6 +124,57 @@ impl FileSystem {
             .modify(0, |f: &mut FSInfo| *f = fsinfo);
 
         let fat = FATManager::new(bpb.fat1_offset(), Arc::clone(&device));
+
+        // 持久化根目录
+        let root_dir_entry = Self::root_entry();
+        let offset = bpb.offset(ROOT_DIR_ENTRY_CLUSTER);
+        assert!(offset % BLOCK_SIZE == 0);
+        let block_id = offset / BLOCK_SIZE;
+        get_block_cache(block_id, Arc::clone(&device))
+            .unwrap()
+            .write()
+            .modify(0, |sed: &mut ShortDirEntry| *sed = root_dir_entry);
+        fat.set_next_cluster(ROOT_DIR_ENTRY_CLUSTER, END_OF_CLUSTER);
+
+        let fs = Arc::new(RwLock::new(Self {
+            device,
+            free_cluster_cnt: Arc::new(RwLock::new(free_cluster_cnt)),
+            bpb,
+            fat: Arc::new(RwLock::new(fat)),
+        }));
+
+        // fix: crate root dir;
+
+        fs
+    }
+
+    pub fn open(device: Arc<dyn BlockDevice>) -> Arc<RwLock<Self>> {
+        let bpb = get_block_cache(0, Arc::clone(&device))
+            .unwrap()
+            .read()
+            .read(0, |bpb: &BIOSParameterBlock| *bpb);
+
+        let free_cluster_cnt = get_block_cache(bpb.fat_info_sector(), Arc::clone(&device))
+            .unwrap()
+            .read()
+            .read(0, |fsinfo: &FSInfo| {
+                assert!(
+                    fsinfo.check_signature(),
+                    "Error loading fat32! Illegal signature"
+                );
+                fsinfo.free_cluster_cnt() as usize
+            });
+
+        let fat = FATManager::open(bpb.fat1_offset(), Arc::clone(&device));
+        let fat = FATManager::new(bpb.fat1_offset(), Arc::clone(&device));
+
+        let offset = bpb.offset(ROOT_DIR_ENTRY_CLUSTER);
+        assert!(offset % BLOCK_SIZE == 0);
+        let block_id = offset / BLOCK_SIZE;
+        let _root_dir_entry = get_block_cache(block_id, Arc::clone(&device))
+            .unwrap()
+            .read()
+            .read(0, |sde: &ShortDirEntry| sde.clone());
 
         Arc::new(RwLock::new(Self {
             device,
