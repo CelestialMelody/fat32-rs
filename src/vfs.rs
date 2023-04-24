@@ -96,6 +96,7 @@ impl VirFile {
     }
 
     pub fn sde_pos(&self) -> (usize, usize) {
+        assert!(self.sde_pos.start_cluster != END_OF_CLUSTER);
         let cluster_id = self.sde_pos.start_cluster;
         let cluster_offset = self.fs.read().bpb.offset(cluster_id);
         let offset = self.sde_pos.offset_in_cluster + cluster_offset;
@@ -106,6 +107,7 @@ impl VirFile {
     }
 
     pub fn lde_pos(&self, index: usize) -> (usize, usize) {
+        assert!(self.lde_pos[index].start_cluster != END_OF_CLUSTER);
         let cluster_id = self.lde_pos[index].start_cluster;
         let cluster_offset = self.fs.read().bpb.offset(cluster_id);
         let offset = self.lde_pos[index].offset_in_cluster + cluster_offset;
@@ -265,13 +267,17 @@ impl VirFile {
         let spc = self.fs.read().bpb.sectors_per_cluster();
         let cluster_size = self.fs.read().cluster_size();
 
+        let file_size = self.file_size();
+
         let mut index = offset;
-        let end = (offset + buf.len()).min(self.file_size());
-        if offset >= self.file_size() || buf.len() == 0 {
+        let end = (offset + buf.len()).min(file_size);
+        // fix: > not >= (new file offset == file_size == 0)
+        if offset > file_size || buf.len() == 0 {
             return 0;
         }
         let pre_cluster_cnt = offset / cluster_size;
         let mut curr_cluster = self.first_cluster() as u32;
+
         for _ in 0..pre_cluster_cnt {
             curr_cluster = self
                 .fs
@@ -290,11 +296,11 @@ impl VirFile {
             let cluster_offset_in_disk = self.fs.read().bpb.offset(curr_cluster);
             let start_block_id = cluster_offset_in_disk / BLOCK_SIZE;
 
+            // fix: code pos of offset_in_block and len (may overflow)
             for block_id in start_block_id..start_block_id + spc {
-                let offset_in_block = index - left;
-                let len = (BLOCK_SIZE - offset_in_block).min(end - index);
-
                 if index >= left && index < right && index < end {
+                    let offset_in_block = index - left;
+                    let len = (BLOCK_SIZE - offset_in_block).min(end - index);
                     let option = get_block_cache(block_id, Arc::clone(&self.device));
                     if let Some(block) = option {
                         block.read().read(0, |cache: &[u8; BLOCK_SIZE]| {
@@ -302,19 +308,26 @@ impl VirFile {
                             let src = &cache[offset_in_block..offset_in_block + len];
                             dst.copy_from_slice(src);
                         });
+                    } else {
+                        // fix: else pos
+                        let mut cache = [0u8; BLOCK_SIZE];
+                        self.device
+                            .read_blocks(&mut cache, block_id * BLOCK_SIZE, 1)
+                            .unwrap();
+                        let dst = &mut buf[already_read..already_read + len];
+                        let src = &cache[offset_in_block..offset_in_block + len];
+                        dst.copy_from_slice(src);
                     }
-                } else {
-                    let mut cache = [0u8; BLOCK_SIZE];
-                    self.device
-                        .read_blocks(&mut cache, block_id * BLOCK_SIZE, 1)
-                        .unwrap();
-                    let dst = &mut buf[already_read..already_read + len];
-                    let src = &cache[offset_in_block..offset_in_block + len];
-                    dst.copy_from_slice(src);
+
+                    // fix: add
+                    index += len;
+                    already_read += len;
+
+                    if index >= end {
+                        break;
+                    }
                 }
 
-                index += len;
-                already_read += len;
                 left += BLOCK_SIZE;
                 right += BLOCK_SIZE;
             }
