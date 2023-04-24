@@ -352,18 +352,30 @@ impl VirFile {
         let spc = self.fs.read().bpb.sectors_per_cluster();
         let cluster_size = self.fs.read().cluster_size();
 
-        let mut index = offset;
-        let end = (offset + buf.len()).min(self.file_size());
-        if offset >= self.file_size() || buf.len() == 0 {
+        // fix
+        if buf.len() == 0 {
             return 0;
         }
 
+        let mut index = offset;
+        // fix: end
+        let end = offset + buf.len();
+
         let new_size = offset + buf.len();
+
         // TODO
         // self.modify_size(new_size);
         self.incerase_size(new_size);
 
+        let cluster_len = self
+            .fs
+            .read()
+            .fat
+            .read()
+            .cluster_chain_len(self.first_cluster() as u32);
+
         let pre_cluster_cnt = offset / cluster_size;
+
         let mut curr_cluster = self.first_cluster() as u32;
         for _ in 0..pre_cluster_cnt {
             curr_cluster = self
@@ -384,10 +396,10 @@ impl VirFile {
             let start_block_id = cluster_offset_in_disk / BLOCK_SIZE;
 
             for block_id in start_block_id..start_block_id + spc {
-                let offset_in_block = index - left;
-                let len = (BLOCK_SIZE - offset_in_block).min(end - index);
-
                 if index >= left && index < right && index < end {
+                    // fix: pos of offset_in_block and len (may overflow)
+                    let offset_in_block = index - left;
+                    let len = (BLOCK_SIZE - offset_in_block).min(end - index);
                     let option = get_block_cache(block_id, Arc::clone(&self.device));
                     if let Some(block) = option {
                         block.write().modify(0, |cache: &mut [u8; BLOCK_SIZE]| {
@@ -395,26 +407,33 @@ impl VirFile {
                             let dst = &mut cache[offset_in_block..offset_in_block + len];
                             dst.copy_from_slice(src);
                         });
+                    } else {
+                        let mut cache = [0u8; BLOCK_SIZE];
+                        self.device
+                            .read_blocks(&mut cache, block_id * BLOCK_SIZE, 1)
+                            .unwrap();
+                        let src = &buf[already_write..already_write + len];
+                        let dst = &mut cache[offset_in_block..offset_in_block + len];
+                        dst.copy_from_slice(src);
+                        self.device
+                            .write_blocks(&cache, block_id * BLOCK_SIZE, 1)
+                            .unwrap();
                     }
-                } else {
-                    let mut cache = [0u8; BLOCK_SIZE];
-                    self.device
-                        .read_blocks(&mut cache, block_id * BLOCK_SIZE, 1)
-                        .unwrap();
-                    let src = &buf[already_write..already_write + len];
-                    let dst = &mut cache[offset_in_block..offset_in_block + len];
-                    dst.copy_from_slice(src);
-                    self.device
-                        .write_blocks(&cache, block_id * BLOCK_SIZE, 1)
-                        .unwrap();
+                    index += len;
+                    already_write += len;
+
+                    // fix: add
+                    if index >= end {
+                        break;
+                    }
                 }
 
-                index += len;
-                already_write += len;
+                // fix: pos of index and already_write
                 left += BLOCK_SIZE;
                 right += BLOCK_SIZE;
             }
 
+            // fix: add
             if index >= end {
                 break;
             }
