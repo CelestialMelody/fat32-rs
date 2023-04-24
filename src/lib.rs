@@ -49,6 +49,8 @@ pub const DIRENT_SIZE: usize = 32;
 pub const LONG_NAME_LEN: u32 = 13;
 pub const STRAT_CLUSTER_IN_FAT: u32 = 2;
 pub const NEW_VIR_FILE_CLUSTER: u32 = 0;
+// 持久化根目录的不得已行为；TODO 实际上只要能够知道根目录大小就行
+pub const ROOT_DIR_ENTRY_CLUSTER: u32 = 3;
 pub const BLOCK_CACHE_LIMIT: usize = 64;
 
 // Name Status for Short Directory Entry
@@ -286,3 +288,9 @@ pub fn generate_short_name(long_name: &str) -> String {
     // 返回一个长度为 11 的string数组
     short_name
 }
+
+// TODO
+// 1. change name
+// 2. time 处理
+// 3. 长短名转化(~n)(目前只有~1)
+// 4. 删除文件后, 目录下的目录项的物理位置上的移动
