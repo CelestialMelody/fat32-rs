@@ -9,8 +9,8 @@ use super::entry::ShortDirEntry;
 use super::fat::FATManager;
 use super::VirFileType;
 use super::{
-    BLOCK_NUM, BLOCK_SIZE, END_OF_CLUSTER, FREE_CLUSTER, ROOT, ROOT_DIR_ENTRY_CLUSTER,
-    STRAT_CLUSTER_IN_FAT,
+    BLOCK_NUM, BLOCK_SIZE, END_OF_CLUSTER, FREE_CLUSTER, NEW_VIR_FILE_CLUSTER, ROOT,
+    ROOT_DIR_ENTRY_CLUSTER, STRAT_CLUSTER_IN_FAT,
 };
 
 pub struct FileSystem {
@@ -250,8 +250,14 @@ impl FileSystem {
     }
 
     pub fn count_needed_clusters(&self, new_size: usize, start_cluster: u32) -> usize {
+        // fix: for new vir_file
+        let cluster_size = self.cluster_size();
+        if start_cluster == NEW_VIR_FILE_CLUSTER || start_cluster == ROOT_DIR_ENTRY_CLUSTER {
+            return (new_size + cluster_size - 1) / cluster_size;
+        }
+
         let old_cluster_cnt = self.fat.read().cluster_chain_len(start_cluster) as usize;
-        let cluster_cnt = (new_size + self.cluster_size() - 1) / self.cluster_size();
+        let cluster_cnt = (new_size + cluster_size - 1) / cluster_size;
         if cluster_cnt > old_cluster_cnt {
             cluster_cnt - old_cluster_cnt
         } else {
