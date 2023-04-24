@@ -469,8 +469,14 @@ impl VirFile {
             return;
         }
 
-        if let Some(start_cluster) = self.fs.write().alloc_cluster(need_cluster_cnt) {
-            if first_cluster == NEW_VIR_FILE_CLUSTER {
+        // fix: dead lock (if put this in expr 'if let Some' directly)
+        let option = self
+            .fs
+            .write()
+            .alloc_cluster(need_cluster_cnt, first_cluster);
+
+        if let Some(start_cluster) = option {
+            if first_cluster == NEW_VIR_FILE_CLUSTER || first_cluster == ROOT_DIR_ENTRY_CLUSTER {
                 self.modify_sde(|sde| {
                     sde.set_first_cluster(start_cluster);
                 });
