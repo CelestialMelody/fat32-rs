@@ -63,6 +63,9 @@ pub const SPACE: u8 = 0x20;
 pub const DOT: u8 = 0x2E;
 pub const ROOT: u8 = 0x2F;
 
+// Just for test
+pub const BLOCK_NUM: u32 = 0x4000;
+
 /// BPB Bytes Per Sector
 pub const BLOCK_SIZE: usize = 512;
 pub const CACHE_SIZE: usize = 512;
