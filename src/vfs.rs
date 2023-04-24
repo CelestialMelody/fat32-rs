@@ -3,15 +3,15 @@ use alloc::sync::Arc;
 use alloc::vec::Vec;
 use spin::RwLock;
 
-use crate::cache::{get_block_cache, BlockCache, Cache};
-use crate::device::BlockDevice;
-use crate::entry::{LongDirEntry, ShortDirEntry};
-use crate::fat::ClusterChain;
-use crate::fs::FileSystem;
-use crate::{
+use super::cache::{get_block_cache, BlockCache, Cache};
+use super::device::BlockDevice;
+use super::entry::{LongDirEntry, ShortDirEntry};
+use super::fat::ClusterChain;
+use super::fs::FileSystem;
+use super::{
     generate_short_name, long_name_split, short_name_format, split_name_ext, VirFileType,
-    ATTR_DIRECTORY, ATTR_LONG_NAME, BLOCK_SIZE, DIRENT_SIZE, DIR_ENTRY_UNUSED, LAST_LONG_ENTRY,
-    NEW_VIR_FILE_CLUSTER, ORIGINAL, STRAT_CLUSTER_IN_FAT,
+    ATTR_DIRECTORY, ATTR_LONG_NAME, BLOCK_SIZE, DIRENT_SIZE, DIR_ENTRY_UNUSED, END_OF_CLUSTER,
+    LAST_LONG_ENTRY, NEW_VIR_FILE_CLUSTER, ORIGINAL, ROOT_DIR_ENTRY_CLUSTER, STRAT_CLUSTER_IN_FAT,
 };
 
 #[derive(Clone)]
@@ -28,15 +28,23 @@ pub struct VirFile {
 pub fn root(fs: Arc<RwLock<FileSystem>>, device: Arc<dyn BlockDevice>) -> VirFile {
     let fs = Arc::clone(&fs);
     let device = Arc::clone(&device);
+
     let cluster_chain = Arc::new(RwLock::new(ClusterChain::new(
         STRAT_CLUSTER_IN_FAT,
         Arc::clone(&device),
         fs.read().bpb.fat1_offset(),
     )));
+
+    // fix: set root next cluster
+    fs.write()
+        .fat
+        .write()
+        .set_next_cluster(STRAT_CLUSTER_IN_FAT, END_OF_CLUSTER);
+
     VirFile::new(
         String::from("/"),
         DirEntryPos {
-            start_cluster: STRAT_CLUSTER_IN_FAT,
+            start_cluster: ROOT_DIR_ENTRY_CLUSTER,
             offset_in_cluster: 0,
         },
         Vec::new(),
@@ -47,7 +55,7 @@ pub fn root(fs: Arc<RwLock<FileSystem>>, device: Arc<dyn BlockDevice>) -> VirFil
     )
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub struct DirEntryPos {
     pub(crate) start_cluster: u32,
     pub(crate) offset_in_cluster: usize,
@@ -116,7 +124,8 @@ impl VirFile {
         } else {
             let mut buf = [0u8; BLOCK_SIZE];
             self.device
-                .read_blocks(buf.as_mut(), block_id * BLOCK_SIZE, 1);
+                .read_blocks(buf.as_mut(), block_id * BLOCK_SIZE, 1)
+                .unwrap();
             let block = BlockCache::new(block_id, Arc::clone(&self.device));
             block.read(offset_in_block, f)
         }
@@ -131,11 +140,13 @@ impl VirFile {
         } else {
             let mut buf = [0u8; BLOCK_SIZE];
             self.device
-                .read_blocks(buf.as_mut(), block_id * BLOCK_SIZE, 1);
+                .read_blocks(buf.as_mut(), block_id * BLOCK_SIZE, 1)
+                .unwrap();
             let mut block = BlockCache::new(block_id, Arc::clone(&self.device));
             let res = block.modify(offset_in_block, f);
             self.device
-                .write_blocks(buf.as_ref(), block_id * BLOCK_SIZE, 1);
+                .write_blocks(buf.as_ref(), block_id * BLOCK_SIZE, 1)
+                .unwrap();
             res
         }
     }
@@ -149,7 +160,8 @@ impl VirFile {
         } else {
             let mut buf = [0u8; BLOCK_SIZE];
             self.device
-                .read_blocks(buf.as_mut(), block_id * BLOCK_SIZE, 1);
+                .read_blocks(buf.as_mut(), block_id * BLOCK_SIZE, 1)
+                .unwrap();
             let block = BlockCache::new(block_id, Arc::clone(&self.device));
             block.read(offset_in_block, f)
         }
@@ -164,11 +176,13 @@ impl VirFile {
         } else {
             let mut buf = [0u8; BLOCK_SIZE];
             self.device
-                .read_blocks(buf.as_mut(), block_id * BLOCK_SIZE, 1);
+                .read_blocks(buf.as_mut(), block_id * BLOCK_SIZE, 1)
+                .unwrap();
             let mut block = BlockCache::new(block_id, Arc::clone(&self.device));
             let res = block.modify(offset_in_block, f);
             self.device
-                .write_blocks(buf.as_ref(), block_id * BLOCK_SIZE, 1);
+                .write_blocks(buf.as_ref(), block_id * BLOCK_SIZE, 1)
+                .unwrap();
             res
         }
     }
@@ -321,7 +335,7 @@ impl VirFile {
         already_read
     }
 
-    pub fn write_at(&self, buf: &[u8], offset: usize) -> usize {
+    pub fn write_at(&self, offset: usize, buf: &[u8]) -> usize {
         let spc = self.fs.read().bpb.sectors_per_cluster();
         let cluster_size = self.fs.read().cluster_size();
 
@@ -456,7 +470,6 @@ impl VirFile {
         } else {
             let left = (new_size + cluster_size - 1) / cluster_size;
             let right = (old_size + cluster_size - 1) / cluster_size;
-            let release_cluster_cnt = right - left;
             let mut release_clsuter_vec = Vec::<u32>::new();
             for i in left..right {
                 let cluster = self
@@ -677,7 +690,7 @@ impl VirFile {
 
         // low -> high
         // lfn(n) -> lfn(n-1) -> .. -> lfn(1) -> sfn
-        let mut sde = ShortDirEntry::empty();
+        let mut sde: ShortDirEntry;
         if name_.len() > 8 || ext_.len() > 3 {
             // 长文件名
             // 生成短文件名及对应目录项
@@ -706,7 +719,7 @@ impl VirFile {
                     sde.gen_check_sum(),
                 );
                 // 写入长文件名目录项
-                let write_size = self.write_at(lde.as_bytes(), entry_offset);
+                let write_size = self.write_at(entry_offset, lde.as_bytes());
                 assert_eq!(write_size, DIRENT_SIZE);
                 // 更新写入位置
                 entry_offset += DIRENT_SIZE;
@@ -718,7 +731,7 @@ impl VirFile {
             sde.set_name_case(ORIGINAL);
         }
         // 写短目录项（长文件名也是有短文件名目录项的）
-        let wirte_size = self.write_at(sde.as_bytes_mut(), entry_offset);
+        let wirte_size = self.write_at(entry_offset, sde.as_bytes());
         assert_eq!(wirte_size, DIRENT_SIZE);
 
         // 验证
@@ -733,7 +746,7 @@ impl VirFile {
                     &_ext,
                     VirFileType::Dir,
                 );
-                file.write_at(parent_sde.as_bytes_mut(), DIRENT_SIZE);
+                file.write_at(DIRENT_SIZE, parent_sde.as_bytes_mut());
 
                 let (_name, _ext) = short_name_format(".");
                 let mut self_sde = ShortDirEntry::new(
@@ -742,7 +755,7 @@ impl VirFile {
                     &_ext,
                     VirFileType::Dir,
                 );
-                file.write_at(self_sde.as_bytes_mut(), 0);
+                file.write_at(0, self_sde.as_bytes_mut());
             }
             return Some(file);
         } else {
