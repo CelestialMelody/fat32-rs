@@ -135,7 +135,6 @@ impl Iterator for ClusterChain {
         let block_offset = offset / BLOCK_SIZE;
         let offset_left = offset % BLOCK_SIZE;
 
-        // TODO
         assert!(self.fat1_offset % BLOCK_SIZE == 0);
         let block_id = self.fat1_offset / BLOCK_SIZE + block_offset;
         let mut buffer = [0u8; BLOCK_SIZE];
@@ -172,6 +171,7 @@ impl Iterator for ClusterChain {
 //  通过 bpb.first_data_sector() 可得到从磁盘0号扇区开始编号的数据区的第一个扇区号(距离磁盘0号扇区的扇区数)
 //
 //  TODO 目前只做了FAT1 (FAT2相当于对FAT1的备份, 可以在每次打开文件系统时复制FAT1到FAT2)
+//  TODO 将整个 FAT 放入内存中进行管理(查空块, 写簇, 簇链随机分配), 以提高性能
 pub struct FATManager {
     device: Arc<dyn BlockDevice>,
     recycled_cluster: VecDeque<u32>,

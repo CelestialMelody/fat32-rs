@@ -167,11 +167,7 @@ pub(crate) fn get_lde_cnt(value_str: &str) -> usize {
     // eg. value = "hello, 你好!" -> value.chars().count() = 10
     let num_char = value_str.chars().count();
     // 向上取整
-    if num_char % 13 == 0 {
-        num_char / 13
-    } else {
-        num_char / 13 + 1
-    }
+    (num_char + LONG_NAME_LEN_CAP - 1) / LONG_NAME_LEN_CAP
 }
 
 /// 根据文件名, 获取对应的第 count 个长目录项的名字对应于文件名的下标
@@ -179,7 +175,7 @@ pub(crate) fn get_lfn_index(value_str: &str, count: usize) -> usize {
     let end = 13 * (count - 1);
     let mut len = 0;
     for (index, ch) in value_str.chars().enumerate() {
-        if (0..end).contains(&index) {
+        if index < end {
             len += ch.len_utf8();
         }
     }
@@ -195,11 +191,7 @@ pub(crate) fn generate_checksum(value: &[u8]) -> u8 {
 }
 
 pub(crate) fn get_needed_sector(value: usize) -> usize {
-    if value % BLOCK_SIZE != 0 {
-        value / BLOCK_SIZE + 1
-    } else {
-        value / BLOCK_SIZE
-    }
+    (value + BLOCK_SIZE - 1) / BLOCK_SIZE
 }
 
 /// 将长文件名拆分, 返回字符串数组

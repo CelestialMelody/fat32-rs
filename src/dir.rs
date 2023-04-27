@@ -6,7 +6,9 @@ use alloc::sync::Arc;
 use alloc::vec::Vec;
 use spin::RwLock;
 
-use super::{generate_short_name, long_name_split, short_name_format, split_name_ext};
+use super::{
+    generate_checksum, generate_short_name, long_name_split, short_name_format, split_name_ext,
+};
 
 use super::{
     ATTR_DIRECTORY, ATTR_LONG_NAME, DIRENT_SIZE, DIR_ENTRY_UNUSED, LAST_LONG_ENTRY,
@@ -129,11 +131,14 @@ impl Dir for VirFile {
                     order |= 0x40;
                 }
                 // 初始化长文件名目录项
+                let name = sde.name_bytes_array();
+                let check_sum = generate_checksum(&name);
                 let lde = LongDirEntry::new_form_name_slice(
                     order,
                     lfn_vec.pop().unwrap(),
                     // TODO 统一 generate_checksum
-                    sde.gen_check_sum(),
+                    // sde.gen_check_sum(),
+                    check_sum,
                 );
                 // 写入长文件名目录项
                 let write_size = self.write_at(entry_offset, lde.as_bytes());

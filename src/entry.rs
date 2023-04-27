@@ -319,8 +319,6 @@ pub struct ShortDirEntry {
     /// DIR_FileSize is not used and is always 0 on a file with the ATTR_DIRECTORY attribute
     /// (directories are sized by simply following their cluster chains to the EOC mark).
     /// size: 4 bytes     offset: 28 Bytes (0x1C~0x1F)
-    //
-    //  文件内容大小字节数, 只对文件有效, 子目录的目录项此处全部设置为 0
     file_size: u32,
 }
 
@@ -439,13 +437,7 @@ impl ShortDirEntry {
         for i in 0..3 {
             name_[i + 8] = self.extension[i];
         }
-        // for i in 0..11 {
-        //     if (sum & 1) != 0 {
-        //         sum = 0x80 + (sum >> 1) + name_[i];
-        //     } else {
-        //         sum = (sum >> 1) + name_[i];
-        //     }
-        // }
+
         for i in 0..11 {
             sum = ((sum & 1) << 7) + (sum >> 1) + name_[i];
         }
