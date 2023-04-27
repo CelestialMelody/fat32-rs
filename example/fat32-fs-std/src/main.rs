@@ -13,6 +13,7 @@ use fat32::file::File;
 use fat32::fs::FileSystem;
 use fat32::vfs::root;
 use fat32::vfs::VirFile;
+use fat32::vfs::VirFileType;
 use fat32::*;
 use lazy_static::*;
 use spin::RwLock;
@@ -36,14 +37,14 @@ lazy_static! {
 }
 
 fn main() {
-    fs_pack().expect("🦀 Error when packing easy fs");
+    fs_pack().expect("🦀 Error when packing easy fat32");
 }
 
 fn fs_pack() -> std::io::Result<()> {
     // 从命令行参数中获取文件名
     // source 参数
 
-    let matche = Command::new("easy-fs")
+    let matche = Command::new("eazy-fat32-fs")
         .arg(
             Arg::new("source")
                 .short('s')
@@ -101,11 +102,11 @@ fn fs_pack() -> std::io::Result<()> {
     })));
 
     let efs = if ways == "create" {
-        // 在虚拟块设备 block_file 上初始化 easy-fs 文件系统
+        // 在虚拟块设备 block_file 上初始化 fs 文件系统
         let efs = FileSystem::create(block_file.clone());
         efs
     } else if ways == "open" {
-        // 在虚拟块设备 block_file 上打开 easy-fs 文件系统
+        // 在虚拟块设备 block_file 上打开 fs 文件系统
         let efs = FileSystem::open(block_file.clone());
         efs
     } else {
@@ -167,7 +168,7 @@ fn fs_pack() -> std::io::Result<()> {
                         _ => {
                             let paths: Vec<&str> = arg.split('/').collect();
                             let new_inode = curr_folder_inode.find(paths);
-                            if new_inode.is_none() {
+                            if new_inode.is_err() {
                                 println!("🦀 cd: no such directory: {}! 🦐", arg);
                                 continue;
                             }
@@ -234,7 +235,7 @@ fn fs_pack() -> std::io::Result<()> {
                 let file_name = file_name.unwrap();
                 let file_name: Vec<&str> = file_name.split('/').collect();
                 let file_inode = curr_folder_inode.find(file_name);
-                if file_inode.is_none() {
+                if file_inode.is_err() {
                     println!("🦀 read: File not found! 🦐");
                     continue;
                 }
@@ -281,23 +282,20 @@ fn fs_pack() -> std::io::Result<()> {
                 let file_name = file_name.unwrap();
                 let file_name: Vec<&str> = file_name.split('/').collect();
                 let file_inode = curr_folder_inode.find(file_name);
-                if file_inode.is_none() {
+                if file_inode.is_err() {
                     println!("🦀 read: File not found! 🦐");
                     continue;
                 }
                 let file_inode = file_inode.unwrap();
                 let size = file_inode.file_size();
 
-                // 如果 input 只有一个参数, 那么就是读取整个文件: offset = 0, size = 文件大小
-                // 如果 input 只有两个参数, 那么就是读取文件的一部分: offset = 第一个参数, size = 文件大小 - offset
                 // 读取整个文件
                 let mut buf = vec![0u8; size];
                 file_inode.read(&mut buf);
+                // 因为没法保证文件的内容是可打印的( offset 开始读的地方 以及最后的长度 不保证是合法的utf8字符)
                 unsafe {
                     println!("{}", String::from_utf8_unchecked(buf));
                 }
-
-                // 因为没法保证文件的内容是可打印的( offset 开始读的地方 以及最后的长度 不保证是合法的utf8字符)
             }
 
             "cat" => {
@@ -309,7 +307,7 @@ fn fs_pack() -> std::io::Result<()> {
                 let file_name = file_name.unwrap();
                 let file_name: Vec<&str> = file_name.split('/').collect();
                 let file_inode = curr_folder_inode.find(file_name);
-                if file_inode.is_none() {
+                if file_inode.is_err() {
                     println!("🦀 cat: File not found! 🦐");
                     continue;
                 }
@@ -354,7 +352,7 @@ fn fs_pack() -> std::io::Result<()> {
                 let file_name = file_name.unwrap();
                 let file_name: Vec<&str> = file_name.split('/').collect();
                 let file_inode = curr_folder_inode.find(file_name);
-                if file_inode.is_none() {
+                if file_inode.is_err() {
                     println!("🦀 write: File not found! 🦐");
                     continue;
                 }
@@ -402,7 +400,7 @@ fn fs_pack() -> std::io::Result<()> {
                 let file_name = file_name.unwrap();
                 let file_name: Vec<&str> = file_name.split('/').collect();
                 let file_inode = curr_folder_inode.find(file_name);
-                if file_inode.is_none() {
+                if file_inode.is_err() {
                     println!("🦀 write: File not found! 🦐");
                     continue;
                 }
@@ -446,7 +444,7 @@ fn fs_pack() -> std::io::Result<()> {
                 let name = file_name.unwrap();
                 let file_name: Vec<&str> = name.split('/').collect();
                 let file_inode = curr_folder_inode.find(file_name);
-                if file_inode.is_none() {
+                if file_inode.is_err() {
                     println!("🦀 stat: File not found! 🦐");
                     continue;
                 }
@@ -463,12 +461,12 @@ fn fs_pack() -> std::io::Result<()> {
                 println!("🐳 The time of {} is {}.", name, time);
             }
 
-            // 从 easy-fs 读取文件保存到 host 文件系统中
+            // 从 fs 读取文件保存到 host 文件系统中
             "get" => {
                 for file in curr_folder_inode.ls().unwrap() {
-                    // 从easy-fs中读取文件
+                    // 从 fs 中读取文件
                     let name = file;
-                    println!("🐬 Get {} from easy-fs.", name);
+                    println!("🐬 Get {} from fs.", name);
                     let file_name: Vec<&str> = name.split('/').collect();
                     let file_inode = curr_folder_inode.find(file_name).unwrap();
                     let mut all_data: Vec<u8> = vec![0; file_inode.file_size() as usize];
@@ -491,7 +489,7 @@ fn fs_pack() -> std::io::Result<()> {
                 }
             }
 
-            // 读取 src_path 下的所有文件 保存到 easy-fs 中
+            // 读取 src_path 下的所有文件 保存到 fs 中
             "set" => {
                 let files: Vec<_> = read_dir(src_path)
                     .unwrap()
@@ -504,13 +502,13 @@ fn fs_pack() -> std::io::Result<()> {
 
                 for file in files {
                     // 从host文件系统中读取文件
-                    println!("🐳 Set {}{} to easy-fs.", src_path, file);
+                    println!("🐳 Set {}{} to fs.", src_path, file);
                     let mut host_file = StdFile::open(format!("{}{}", src_path, file)).unwrap();
                     let mut all_data: Vec<u8> = Vec::new();
                     host_file.read_to_end(&mut all_data).unwrap();
                     // 创建文件
                     let inode = curr_folder_inode.create(file.as_str(), VirFileType::File);
-                    if inode.is_some() {
+                    if inode.is_ok() {
                         // 写入文件
                         let inode = inode.unwrap();
                         inode.write_at(0, all_data.as_slice());
@@ -596,8 +594,8 @@ fn fs_pack() -> std::io::Result<()> {
                 println!("🐳 stat: show file or folder stat.\n");
                 println!("🐳 get: a test of fs, getting files to host form root directory.\n");
                 println!("🐳 set: a test of fs, setting host files (src files of fs) to root directory.\n");
-                println!("🐳 fmt: format easy-fs.\n");
-                println!("🐳 exit: exit easy-fs.\n");
+                println!("🐳 fmt: format fs.\n");
+                println!("🐳 exit: exit fs.\n");
 
                 println!("🐳 chname: change file or folder name.");
                 println!("   🍡 usage: chname old_name new_name");
