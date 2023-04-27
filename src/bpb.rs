@@ -199,7 +199,6 @@ pub enum FatType {
     FAT12,
 }
 
-// TODO: u32 or usize?
 impl BIOSParameterBlock {
     #[inline(always)]
     /// Get the first sector offset bytes of the cluster from the cluster number

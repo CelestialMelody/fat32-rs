@@ -22,10 +22,12 @@ extern crate alloc;
 use alloc::string::String;
 use alloc::vec::Vec;
 
+// Signature
 pub const LEAD_SIGNATURE: u32 = 0x41615252;
 pub const STRUCT_SIGNATURE: u32 = 0x61417272;
 pub const TRAIL_SIGNATURE: u32 = 0xAA550000;
 
+// Cluster
 pub const FREE_CLUSTER: u32 = 0x00000000;
 pub const END_CLUSTER: u32 = 0x0FFFFFF8;
 pub const BAD_CLUSTER: u32 = 0x0FFFFFF7;
@@ -38,6 +40,10 @@ pub const BAD_CLUSTER: u32 = 0x0FFFFFF7;
 //  在创建新簇时将其在 FAT 表中的值设置为 EOC
 //  这样在 next() 中也判断是否为 EOC
 pub const END_OF_CLUSTER: u32 = 0x0FFFFFFF;
+pub const STRAT_CLUSTER_IN_FAT: u32 = 2;
+pub const NEW_VIR_FILE_CLUSTER: u32 = 0;
+// TODO 持久化根目录的不得已行为, 实际上只要能够知道根目录大小就行
+pub const ROOT_DIR_ENTRY_CLUSTER: u32 = 3;
 
 pub const ATTR_READ_ONLY: u8 = 0x01;
 pub const ATTR_HIDDEN: u8 = 0x02;
@@ -48,11 +54,8 @@ pub const ATTR_ARCHIVE: u8 = 0x20;
 pub const ATTR_LONG_NAME: u8 = ATTR_READ_ONLY | ATTR_HIDDEN | ATTR_SYSTEM | ATTR_VOLUME_ID;
 
 pub const DIRENT_SIZE: usize = 32;
-pub const LONG_NAME_LEN: u32 = 13;
-pub const STRAT_CLUSTER_IN_FAT: u32 = 2;
-pub const NEW_VIR_FILE_CLUSTER: u32 = 0;
-// 持久化根目录的不得已行为; TODO 实际上只要能够知道根目录大小就行
-pub const ROOT_DIR_ENTRY_CLUSTER: u32 = 3;
+
+// Cache Limit
 pub const BLOCK_CACHE_LIMIT: usize = 64;
 
 // Name Status for Short Directory Entry
@@ -65,7 +68,7 @@ pub const SPACE: u8 = 0x20;
 pub const DOT: u8 = 0x2E;
 pub const ROOT: u8 = 0x2F;
 
-// Just for test
+// For Test
 pub const BLOCK_NUM: u32 = 0x4000;
 
 /// BPB Bytes Per Sector
@@ -75,8 +78,9 @@ pub const FAT_BUFFER_SIZE: usize = 512;
 pub const DIR_BUFFER_SIZE: usize = 512;
 pub const FILE_BUFFER_SIZE: usize = 512;
 
-pub const LONG_DIR_ENT_NAME_CAPACITY: usize = 13;
-pub const SHORT_DIR_ENT_NAME_CAPACITY: usize = 11;
+// Directory Entry Name Length Capicity
+pub const LONG_NAME_LEN_CAP: usize = 13;
+pub const SHORT_NAME_LEN_CAP: usize = 11;
 
 /// For Short Directory Entry Name[0] and Long Directory Entry Ord
 ///
@@ -116,13 +120,6 @@ pub enum BlockDeviceError {
     ClusterChain(ClusterChainErr),
     Dir(DirError),
     File(FileError),
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[repr(u8)]
-pub enum VirFileType {
-    Dir = ATTR_DIRECTORY,
-    File = ATTR_ARCHIVE,
 }
 
 pub(crate) fn read_le_u16(input: &[u8]) -> u16 {
@@ -208,18 +205,18 @@ pub(crate) fn get_needed_sector(value: usize) -> usize {
 /// 将长文件名拆分, 返回字符串数组
 pub fn long_name_split(name: &str) -> Vec<[u16; 13]> {
     let mut name: Vec<u16> = name.encode_utf16().collect();
-    let len = name.len() as u32; // 注意: 要有 \0
+    let len = name.len(); // 注意: 要有 \0
 
     // 计算需要几个目录项, 向上取整
     // 以 13个字符为单位进行切割, 每一组占据一个目录项
-    let lfn_cnt = (len + LONG_NAME_LEN - 1) / LONG_NAME_LEN;
-    if len < lfn_cnt * LONG_NAME_LEN {
+    let lfn_cnt = (len + LONG_NAME_LEN_CAP - 1) / LONG_NAME_LEN_CAP;
+    if len < lfn_cnt * LONG_NAME_LEN_CAP {
         name.push(0x00);
-        while name.len() < (lfn_cnt * LONG_NAME_LEN) as usize {
+        while name.len() < (lfn_cnt * LONG_NAME_LEN_CAP) as usize {
             name.push(0xFF);
         }
     }
-    name.chunks(LONG_NAME_LEN as usize)
+    name.chunks(LONG_NAME_LEN_CAP as usize)
         .map(|x| {
             let mut arr = [0u16; 13];
             arr.copy_from_slice(x);

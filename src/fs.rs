@@ -9,7 +9,7 @@ use super::cache::Cache;
 use super::device::BlockDevice;
 use super::entry::ShortDirEntry;
 use super::fat::FATManager;
-use super::VirFileType;
+use super::vfs::VirFileType;
 
 use super::{
     BLOCK_NUM, BLOCK_SIZE, END_OF_CLUSTER, FREE_CLUSTER, NEW_VIR_FILE_CLUSTER, ROOT,
@@ -146,8 +146,6 @@ impl FileSystem {
             fat: Arc::new(RwLock::new(fat)),
         }));
 
-        // fix: crate root dir;
-
         fs
     }
 
@@ -253,8 +251,8 @@ impl FileSystem {
     }
 
     pub fn count_needed_clusters(&self, new_size: usize, start_cluster: u32) -> usize {
-        // fix: for new vir_file
         let cluster_size = self.cluster_size();
+        // For new vir file
         if start_cluster == NEW_VIR_FILE_CLUSTER || start_cluster == ROOT_DIR_ENTRY_CLUSTER {
             return (new_size + cluster_size - 1) / cluster_size;
         }

@@ -191,11 +191,11 @@
 
 // #![allow(unused)]
 
-use super::VirFileType;
+use super::vfs::VirFileType;
 use super::{
     ATTR_ARCHIVE, ATTR_DIRECTORY, ATTR_HIDDEN, ATTR_LONG_NAME, ATTR_READ_ONLY, ATTR_SYSTEM,
     ATTR_VOLUME_ID, DIR_ENTRY_LAST_AND_UNUSED, DIR_ENTRY_UNUSED, LAST_LONG_ENTRY,
-    LONG_DIR_ENT_NAME_CAPACITY, SPACE,
+    LONG_NAME_LEN_CAP, SPACE,
 };
 
 use alloc::string::{String, ToString};
@@ -447,7 +447,6 @@ impl ShortDirEntry {
         //     }
         // }
         for i in 0..11 {
-            // fix
             sum = ((sum & 1) << 7) + (sum >> 1) + name_[i];
         }
         sum
@@ -868,8 +867,8 @@ impl LongDirEntry {
         String::from_utf16_lossy(&name_all[..len])
     }
 
-    pub fn name_utf16(&self) -> [u16; LONG_DIR_ENT_NAME_CAPACITY] {
-        let mut name_all: [u16; LONG_DIR_ENT_NAME_CAPACITY] = [0u16; LONG_DIR_ENT_NAME_CAPACITY];
+    pub fn name_utf16(&self) -> [u16; LONG_NAME_LEN_CAP] {
+        let mut name_all: [u16; LONG_NAME_LEN_CAP] = [0u16; LONG_NAME_LEN_CAP];
 
         name_all[..5].copy_from_slice(unsafe { &core::ptr::addr_of!(self.name1).read_unaligned() });
         name_all[5..11]

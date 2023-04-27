@@ -1,6 +1,5 @@
 use super::entry::{LongDirEntry, ShortDirEntry};
-use super::vfs::{DirEntryPos, VirFile};
-use super::VirFileType;
+use super::vfs::{DirEntryPos, VirFile, VirFileType};
 
 use alloc::string::String;
 use alloc::sync::Arc;
@@ -87,11 +86,9 @@ impl Dir for VirFile {
     fn create(&self, name: &str, file_type: VirFileType) -> Result<VirFile, DirError> {
         // 检测同名文件
         assert!(self.is_dir());
-        // fix: add
         let option = self.find_by_name(name);
         if let Some(file) = option {
             if file.vir_file_type() == file_type {
-                // TODO 改 result 处理
                 return Err(DirError::FileHasExist);
             }
         }
@@ -168,7 +165,7 @@ impl Dir for VirFile {
                     VirFileType::Dir,
                 );
 
-                // fix: 注意文件大小的更新, 否则返回上级目录没法读
+                // 注意文件大小的更新, 否则返回上级目录没法读
                 let parent_file_size = self.file_size();
                 parent_sde.set_file_size(parent_file_size as u32);
                 file.write_at(DIRENT_SIZE, parent_sde.as_bytes_mut());
@@ -201,16 +198,12 @@ impl VirFile {
         let name_last = name_vec[name_cnt - 1].clone();
         let dir_size = self.file_size();
 
-        // println!("[find_by_lfn] name: {}", name);
-
         loop {
-            // fix
             if index > dir_size {
                 return None;
             }
 
             let mut read_size = self.read_at(index, lde.as_bytes_mut());
-            // fix
             if read_size != DIRENT_SIZE {
                 return None;
             }
@@ -269,7 +262,6 @@ impl VirFile {
                             VirFileType::File
                         };
 
-                        // fix clus
                         let clus_chain = self.file_cluster_chain(index);
 
                         return Some(VirFile::new(
@@ -296,14 +288,12 @@ impl VirFile {
         let dir_size = self.file_size();
 
         loop {
-            // fix
             if index > dir_size {
                 return None;
             }
 
             let read_size = self.read_at(index, sde.as_bytes_mut());
 
-            // fix: do not sde.is_free() of sde.is_deleted()
             if read_size != DIRENT_SIZE {
                 return None;
             }
@@ -319,7 +309,6 @@ impl VirFile {
                     VirFileType::File
                 };
 
-                // fix clus
                 let clus_chain = self.file_cluster_chain(index);
 
                 return Some(VirFile::new(

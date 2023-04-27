@@ -4,14 +4,12 @@
 //! 关于块/扇区/簇的变量命名:  block_id 在存储介质从 0 开始 从 0 编号, cluster_id 为从 数据区开始从 2 开始的簇号
 //! cluster 为从数据区开始的簇号, 从 2 开始编号, 其他命名尽量容易理解 如 block_id_in_cluster 为簇内块号
 
-use crate::NEW_VIR_FILE_CLUSTER;
-
 use super::cache::get_block_cache;
 use super::read_le_u32;
 
 use super::cache::Cache;
 use super::device::BlockDevice;
-use super::{BLOCK_SIZE, END_OF_CLUSTER};
+use super::{BLOCK_SIZE, END_OF_CLUSTER, NEW_VIR_FILE_CLUSTER};
 
 use alloc::collections::VecDeque;
 use alloc::sync::Arc;
@@ -47,24 +45,12 @@ pub struct ClusterChain {
     /// Therefore, previous_cluster and next_cluster are invalid.
     /// Use next() to get the first cluster.
     //
+    //  Note
     //  current_cluster == 0 相当于头节点, 此时 previous_cluster, next_cluster 无效.
-    //  需要调用 .next() 方法获取第一个簇号
+    //  需要调用 .next() 方法获取第一个簇号; 或当使用迭代器时, 会自动从 start_cluster 开始
     pub(crate) current_cluster: u32,
     pub(crate) next_cluster: Option<u32>,
 }
-
-// impl ClusterChain {
-//     pub fn print(&self) {
-//         let mut clus_chian = self.clone();
-//         let mut op = clus_chian.next();
-//         while op.is_some() {
-//             clus_chian = op.unwrap();
-//             let cluster = clus_chian.current_cluster;
-//             println!("[cluster::print] cluster: {}", cluster);
-//             op = clus_chian.next();
-//         }
-//     }
-// }
 
 impl Debug for ClusterChain {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
@@ -185,7 +171,7 @@ impl Iterator for ClusterChain {
 //  在数据区以 cluster_size 为单位从 0 开始编号, 故根据 cluster_id 求出偏移时 cluster_id - 2
 //  通过 bpb.first_data_sector() 可得到从磁盘0号扇区开始编号的数据区的第一个扇区号(距离磁盘0号扇区的扇区数)
 //
-//  目前只做了FAT1 (FAT2相当于对FAT1的备份, 目前想法是可以在每次打开文件系统时复制FAT1到FAT2)
+//  TODO 目前只做了FAT1 (FAT2相当于对FAT1的备份, 可以在每次打开文件系统时复制FAT1到FAT2)
 pub struct FATManager {
     device: Arc<dyn BlockDevice>,
     recycled_cluster: VecDeque<u32>,
@@ -194,15 +180,6 @@ pub struct FATManager {
 
 impl FATManager {
     pub fn open(fat_offset: usize, device: Arc<dyn BlockDevice>) -> Self {
-        // debug
-        // let block_id = fat_offset / BLOCK_SIZE;
-        // println!("fat table at block[{}]", block_id);
-        // get_block_cache(block_id, Arc::clone(&device))
-        //     .unwrap()
-        //     .read()
-        //     .read(0, |buf: &[u8; BLOCK_SIZE >> 3]| {
-        //         println!("[fat::open] fat table: {:?}", buf)
-        //     });
         Self {
             device: Arc::clone(&device),
             recycled_cluster: VecDeque::new(),
@@ -215,7 +192,6 @@ impl FATManager {
         self.device
             .read_blocks(&mut buffer, self.fat1_offset + block_id * BLOCK_SIZE, 1)
             .unwrap();
-        // println!("[fat::read] fat table at block[{}]: {:?}", block_id, buffer);
         buffer
     }
 
@@ -226,7 +202,8 @@ impl FATManager {
             fat1_offset: fat_offset,
         };
 
-        // fix: init fat table: 由于簇号从 2 开始, 现在将簇号 0, 1 的内容填充方便找到正确的簇(防止误操作)
+        // Initialize FAT1 Table
+        // 由于簇号从 2 开始, 现在将簇号 0, 1 的内容填充方便找到正确的簇(防止误操作)
         let block_id = fat.fat1_offset / BLOCK_SIZE;
 
         assert!(fat.fat1_offset % BLOCK_SIZE == 0);
@@ -250,7 +227,9 @@ impl FATManager {
         // ThisFATSecNum = BPB_ResvdSecCnt + (FATOffset / BPB_BytsPerSec);
         // ThisFATEntOffset = REM(FATOffset / BPB_BytsPerSec);
         //
-        // fix: 不需要 >= 2; fs::open 时对 fat_manager 预处理了 2. 新建文件的 cluster_id = 0 会 panic
+        // 不需要 断言 index >= 2, 理由:
+        // 1. fs::open 时对 fat_manager 预处理了
+        // 2. 新建文件的 cluster_id = 0 会 panic
         let offset = index as usize * 4 + self.fat1_offset;
         let block_id = offset / BLOCK_SIZE;
         let offset_in_block = offset % BLOCK_SIZE;
@@ -258,14 +237,13 @@ impl FATManager {
     }
 
     // 从FAT表中找到空闲的簇
-    // fix: 从 start_from 开始找, 提高查找效率
+    // 从 start_from 开始找, 提高查找效率
     fn find_blank_cluster(&self, start_from: u32) -> u32 {
         // 加 1 过滤已经分配的簇号 (该簇号还未初始值为EOC, 防止找到同样的簇号)
         let mut cluster = start_from + 1;
         let mut done = false;
         let mut buffer = [0u8; BLOCK_SIZE];
 
-        // fix 修改查询方式
         loop {
             let (block_id, offset) = self.cluster_id_pos(cluster);
             let option = get_block_cache(block_id, Arc::clone(&self.device));
@@ -291,14 +269,11 @@ impl FATManager {
             }
         }
 
-        // println!("[fat::find_blank_cluster] cluster: {}", cluster);
         cluster & END_OF_CLUSTER
     }
 
     pub fn blank_cluster(&mut self, start_from: u32) -> u32 {
         if let Some(cluster) = self.recycled_cluster.pop_front() {
-            // println!("recycled cluster: {}", cluster);
-
             cluster & END_OF_CLUSTER
         } else {
             self.find_blank_cluster(start_from)
@@ -306,7 +281,6 @@ impl FATManager {
     }
 
     pub fn recycle(&mut self, cluster: u32) {
-        // println!("recycle cluster: {}", cluster);
         self.recycled_cluster.push_back(cluster);
     }
 
@@ -395,7 +369,6 @@ impl FATManager {
         let mut curr_cluster = start_cluster;
         let mut vec: Vec<u32> = Vec::new();
         loop {
-            println!("[fat::get_all_cluster_id] curr_cluster: {}", curr_cluster);
             vec.push(curr_cluster & END_OF_CLUSTER);
             let option = self.get_next_cluster(curr_cluster);
             if let Some(next_cluster) = option {

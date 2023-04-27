@@ -130,8 +130,8 @@ impl BlockCacheManager {
         if let Some(pair) = self.lru.get(&block_id) {
             Some(Arc::clone(pair))
         } else {
-            // 如果不在lru_cache中, 就创建一个新的block_cache
-            // 如果lru_cache已经满了, 就把最久没有使用的block_cache写回磁盘(不过只有引用计数为 0 的时候才会 drop 写回磁盘)
+            // 如果不在 lru_cache 中, 就创建一个新的 block_cache
+            // 如果 lru_cache 已经满了, 就把最久没有使用的 block_cache 写回磁盘(不过只有引用计数为 0 的时候才会 drop 写回磁盘)
             // TODO
             // 理论上缓存需要有极限, 不过是否要限制呢?
             if self.lru.len() == BLOCK_CACHE_LIMIT {

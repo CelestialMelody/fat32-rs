@@ -43,26 +43,7 @@ impl File for VirFile {
 
         let clus_chain = self.cluster_chain.read().clone();
 
-        // let clus_read = clus_chain.clone();
-        // clus_read.print();
-
         assert_eq!(clus_chain.current_cluster, NEW_VIR_FILE_CLUSTER);
-
-        // fix 似乎map 后自动调用 next 不需要手动跳过 curr_cluster = 0 的情况
-
-        // if clus_chain.current_cluster == NEW_VIR_FILE_CLUSTER {
-        //     let option = clus_chain.next();
-        //     if option.is_some() {
-        //         clus_chain = option.unwrap();
-
-        //         println!(
-        //             "[read] clus_chain.current_cluster = {}",
-        //             clus_chain.current_cluster
-        //         );
-        //     } else {
-        //         return Err(FileError::BadClusterChain);
-        //     }
-        // }
 
         let mut index = 0;
         clus_chain

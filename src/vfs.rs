@@ -10,10 +10,9 @@ use super::device::BlockDevice;
 use super::entry::{LongDirEntry, ShortDirEntry};
 use super::fat::ClusterChain;
 use super::fs::FileSystem;
-use super::VirFileType;
 use super::{
-    ATTR_LONG_NAME, BLOCK_SIZE, DIRENT_SIZE, END_OF_CLUSTER, NEW_VIR_FILE_CLUSTER,
-    ROOT_DIR_ENTRY_CLUSTER, STRAT_CLUSTER_IN_FAT,
+    ATTR_ARCHIVE, ATTR_DIRECTORY, ATTR_LONG_NAME, BLOCK_SIZE, DIRENT_SIZE, END_OF_CLUSTER,
+    NEW_VIR_FILE_CLUSTER, ROOT_DIR_ENTRY_CLUSTER, STRAT_CLUSTER_IN_FAT,
 };
 
 #[derive(Clone)]
@@ -37,7 +36,7 @@ pub fn root(fs: Arc<RwLock<FileSystem>>, device: Arc<dyn BlockDevice>) -> VirFil
         fs.read().bpb.fat1_offset(),
     )));
 
-    // fix: set root next cluster
+    // Set root next cluster
     fs.write()
         .fat
         .write()
@@ -55,6 +54,13 @@ pub fn root(fs: Arc<RwLock<FileSystem>>, device: Arc<dyn BlockDevice>) -> VirFil
         cluster_chain,
         VirFileType::Dir,
     )
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
+pub enum VirFileType {
+    Dir = ATTR_DIRECTORY,
+    File = ATTR_ARCHIVE,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -99,7 +105,6 @@ impl VirFile {
         let (block_id, offset_in_block) = self.offset_block_pos(sde_pos).unwrap();
         let mut start_cluster: u32 = NEW_VIR_FILE_CLUSTER;
 
-        // fix clus
         let option = get_block_cache(block_id, Arc::clone(&self.device));
         if let Some(block) = option {
             block.read().read(offset_in_block, |sde: &ShortDirEntry| {
@@ -272,7 +277,7 @@ impl VirFile {
             .fat
             .read()
             .get_cluster_at(start_cluster as u32, cluster_index as u32)
-            .unwrap(); // assert offset < file_size()
+            .unwrap();
 
         Some(DirEntryPos::new(cluster, offset_in_cluster))
     }
@@ -297,45 +302,18 @@ impl VirFile {
 
         let mut index = offset;
         let end = (offset + buf.len()).min(file_size);
-        // fix: > not >= (new file offset == file_size == 0)
+
+        // > not >=
         if offset > file_size || buf.len() == 0 {
             return 0;
         }
         let pre_cluster_cnt = offset / cluster_size;
         let mut curr_cluster = self.first_cluster() as u32;
 
-        // println!("[readdd_at] vir file name: {}", self.name());
-
-        // println!(
-        //     "[incrase_size] vir file cluster chain: {:?}",
-        //     self.cluster_chain.read()
-        // );
         let mut clus_chain = self.cluster_chain.read().clone();
-        // let clus_read = self.cluster_chain.read().clone();
 
         assert_eq!(clus_chain.current_cluster, NEW_VIR_FILE_CLUSTER);
-
-        // if clus_chain.current_cluster == NEW_VIR_FILE_CLUSTER {
-        //     let option = clus_chain.next();
-        //     if option.is_some() {
-        //         clus_chain = option.unwrap();
-
-        //         println!(
-        //             "[read] clus_chain.current_cluster = {}",
-        //             clus_chain.current_cluster
-        //         );
-        //     } else {
-        //         return 0;
-        //     }
-        // }
         assert_ne!(clus_chain.start_cluster, 0);
-        // assert_ne!(clus_read.start_cluster, 0);
-        // clus_read.print();
-
-        // println!(
-        //     "[read_at] pre_cluster_cnt: {}, curr_cluster: {}, clus_chian.current_cluster: {}",
-        //     pre_cluster_cnt, curr_cluster, clus_chian.current_cluster
-        // );
 
         for _ in 0..pre_cluster_cnt {
             // curr_cluster = self
@@ -347,7 +325,6 @@ impl VirFile {
             //     .unwrap();
 
             clus_chain = clus_chain.next().unwrap();
-
             // assert_eq!(curr_cluster, clus_chain.current_cluster);
             curr_cluster = clus_chain.current_cluster;
         }
@@ -361,14 +338,10 @@ impl VirFile {
 
             let start_block_id = cluster_offset_in_disk / BLOCK_SIZE;
 
-            // fix: code pos of offset_in_block and len (may overflow)
             for block_id in start_block_id..start_block_id + spc {
                 if index >= left && index < right && index < end {
                     let offset_in_block = index - left;
                     let len = (BLOCK_SIZE - offset_in_block).min(end - index);
-
-                    // println!("[read_at] block_id: {}", block_id);
-                    // println!("[read_at] len: {}", len);
 
                     let option = get_block_cache(block_id, Arc::clone(&self.device));
                     if let Some(block) = option {
@@ -378,7 +351,6 @@ impl VirFile {
                             dst.copy_from_slice(src);
                         });
                     } else {
-                        // fix: else pos
                         let mut cache = [0u8; BLOCK_SIZE];
                         self.device
                             .read_blocks(&mut cache, block_id * BLOCK_SIZE, 1)
@@ -388,7 +360,6 @@ impl VirFile {
                         dst.copy_from_slice(src);
                     }
 
-                    // fix: add
                     index += len;
                     already_read += len;
 
@@ -425,13 +396,11 @@ impl VirFile {
         let spc = self.fs.read().bpb.sectors_per_cluster();
         let cluster_size = self.fs.read().cluster_size();
 
-        // fix
         if buf.len() == 0 {
             return 0;
         }
 
         let mut index = offset;
-        // fix: end
         let end = offset + buf.len();
 
         let new_size = offset + buf.len();
@@ -439,11 +408,6 @@ impl VirFile {
         // TODO
         // self.modify_size(new_size);
         self.incerase_size(new_size);
-
-        // println!(
-        //     "[incrase_size] vir file cluster chain: {:?}",
-        //     self.cluster_chain.read()
-        // );
 
         let pre_cluster_cnt = offset / cluster_size;
 
@@ -474,7 +438,6 @@ impl VirFile {
 
             for block_id in start_block_id..start_block_id + spc {
                 if index >= left && index < right && index < end {
-                    // fix: pos of offset_in_block and len (may overflow)
                     let offset_in_block = index - left;
                     let len = (BLOCK_SIZE - offset_in_block).min(end - index);
                     let option = get_block_cache(block_id, Arc::clone(&self.device));
@@ -499,18 +462,15 @@ impl VirFile {
                     index += len;
                     already_write += len;
 
-                    // fix: add
                     if index >= end {
                         break;
                     }
                 }
 
-                // fix: pos of index and already_write
                 left += BLOCK_SIZE;
                 right += BLOCK_SIZE;
             }
 
-            // fix: add
             if index >= end {
                 break;
             }
@@ -550,7 +510,6 @@ impl VirFile {
             return;
         }
 
-        // fix: dead lock (if put this in expr 'if let Some' directly)
         let option = self
             .fs
             .write()
@@ -558,21 +517,7 @@ impl VirFile {
 
         if let Some(start_cluster) = option {
             if first_cluster == NEW_VIR_FILE_CLUSTER || first_cluster == ROOT_DIR_ENTRY_CLUSTER {
-                // fix clus
-                // println!("[incrase_size] vir file name: {}", self.name());
-                // println!(
-                //     "[incrase_size] vir file cluster chain: {:?}",
-                //     self.cluster_chain.read()
-                // );
-
                 self.cluster_chain.write().refresh(start_cluster);
-                // let clus_read = self.cluster_chain.read().clone();
-                // clus_read.print();
-
-                // println!(
-                //     "[incrase_size] vir file cluster chain: {:?}",
-                //     self.cluster_chain.read()
-                // );
 
                 self.modify_sde(|sde| {
                     sde.set_first_cluster(start_cluster);
@@ -632,7 +577,6 @@ impl VirFile {
                 .get_cluster_at(first_cluster, left as u32 - 1)
                 .unwrap();
             assert!(last_clus >= 2);
-            // fix
             self.fs
                 .write()
                 .fat
@@ -655,14 +599,6 @@ impl VirFile {
         let all_clusters = self.fs.read().fat.read().get_all_cluster_id(first_cluster);
         self.fs.write().dealloc_cluster(all_clusters);
     }
-
-    // pub fn remove(&self, path: Vec<&str>) {
-    //     if let Some(file) = self.find(path) {
-    //         file.clear();
-    //     } else {
-    //         panic!("delete_by_path error!");
-    //     }
-    // }
 
     /// 返回: (st_size, st_blksize, st_blocks, is_dir, time)
     /// TODO 时间等
