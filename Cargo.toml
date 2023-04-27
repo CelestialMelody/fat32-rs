@@ -1,5 +1,5 @@
 [package]
-name = "fat32"
+name = "fat32-rs"
 version = "0.2.0"
 edition = "2021"
 
