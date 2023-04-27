@@ -8,6 +8,8 @@ use chrono::{
 use clap::{Arg, Command};
 use device::BlockFile;
 use fat32::cache::sync_all;
+use fat32::dir::Dir;
+use fat32::file::File;
 use fat32::fs::FileSystem;
 use fat32::vfs::root;
 use fat32::vfs::VirFile;
@@ -15,7 +17,7 @@ use fat32::*;
 use lazy_static::*;
 use spin::RwLock;
 use std::{
-    fs::{read_dir, File, OpenOptions},
+    fs::{read_dir, File as StdFile, OpenOptions},
     io::{stdin, stdout, Read, Write},
     sync::Arc,
 };
@@ -164,7 +166,7 @@ fn fs_pack() -> std::io::Result<()> {
                         // }
                         _ => {
                             let paths: Vec<&str> = arg.split('/').collect();
-                            let new_inode = curr_folder_inode.find_by_path(paths);
+                            let new_inode = curr_folder_inode.find(paths);
                             if new_inode.is_none() {
                                 println!("🦀 cd: no such directory: {}! 🦐", arg);
                                 continue;
@@ -194,6 +196,17 @@ fn fs_pack() -> std::io::Result<()> {
                 curr_folder_inode.create(file_name, VirFileType::File);
             }
 
+            "fat" => {
+                println!("🐳 Please input the block number (start from 0): ");
+                let mut input = String::new();
+                stdin()
+                    .read_line(&mut input)
+                    .expect("🦀 Failed to read input :(");
+                let block_num = input.trim().parse::<usize>().unwrap();
+                let block = efs.read().fat_read(block_num);
+                println!("🐳 The fat table at {} content is: {:?}", block_num, block);
+            }
+
             "mkdir" => {
                 let file_name = input.next();
                 if file_name.is_none() {
@@ -207,7 +220,7 @@ fn fs_pack() -> std::io::Result<()> {
             // 读取目录下的所有文件
             "ls" => {
                 for file in curr_folder_inode.ls().unwrap() {
-                    println!("{}", file.0);
+                    println!("{}", file);
                 }
             }
 
@@ -220,7 +233,7 @@ fn fs_pack() -> std::io::Result<()> {
                 }
                 let file_name = file_name.unwrap();
                 let file_name: Vec<&str> = file_name.split('/').collect();
-                let file_inode = curr_folder_inode.find_by_path(file_name);
+                let file_inode = curr_folder_inode.find(file_name);
                 if file_inode.is_none() {
                     println!("🦀 read: File not found! 🦐");
                     continue;
@@ -259,6 +272,34 @@ fn fs_pack() -> std::io::Result<()> {
                 // 因为没法保证文件的内容是可打印的( offset 开始读的地方 以及最后的长度 不保证是合法的utf8字符)
             }
 
+            "read_" => {
+                let file_name = input.next();
+                if file_name.is_none() {
+                    println!("🦀 read: Miss file name! 🦐");
+                    continue;
+                }
+                let file_name = file_name.unwrap();
+                let file_name: Vec<&str> = file_name.split('/').collect();
+                let file_inode = curr_folder_inode.find(file_name);
+                if file_inode.is_none() {
+                    println!("🦀 read: File not found! 🦐");
+                    continue;
+                }
+                let file_inode = file_inode.unwrap();
+                let size = file_inode.file_size();
+
+                // 如果 input 只有一个参数, 那么就是读取整个文件: offset = 0, size = 文件大小
+                // 如果 input 只有两个参数, 那么就是读取文件的一部分: offset = 第一个参数, size = 文件大小 - offset
+                // 读取整个文件
+                let mut buf = vec![0u8; size];
+                file_inode.read(&mut buf);
+                unsafe {
+                    println!("{}", String::from_utf8_unchecked(buf));
+                }
+
+                // 因为没法保证文件的内容是可打印的( offset 开始读的地方 以及最后的长度 不保证是合法的utf8字符)
+            }
+
             "cat" => {
                 let file_name = input.next();
                 if file_name.is_none() {
@@ -267,7 +308,7 @@ fn fs_pack() -> std::io::Result<()> {
                 }
                 let file_name = file_name.unwrap();
                 let file_name: Vec<&str> = file_name.split('/').collect();
-                let file_inode = curr_folder_inode.find_by_path(file_name);
+                let file_inode = curr_folder_inode.find(file_name);
                 if file_inode.is_none() {
                     println!("🦀 cat: File not found! 🦐");
                     continue;
@@ -312,7 +353,7 @@ fn fs_pack() -> std::io::Result<()> {
                 }
                 let file_name = file_name.unwrap();
                 let file_name: Vec<&str> = file_name.split('/').collect();
-                let file_inode = curr_folder_inode.find_by_path(file_name);
+                let file_inode = curr_folder_inode.find(file_name);
                 if file_inode.is_none() {
                     println!("🦀 write: File not found! 🦐");
                     continue;
@@ -352,6 +393,49 @@ fn fs_pack() -> std::io::Result<()> {
                 }
             }
 
+            "write_" => {
+                let file_name = input.next();
+                if file_name.is_none() {
+                    println!("🦀 write: Miss file name! 🦐");
+                    continue;
+                }
+                let file_name = file_name.unwrap();
+                let file_name: Vec<&str> = file_name.split('/').collect();
+                let file_inode = curr_folder_inode.find(file_name);
+                if file_inode.is_none() {
+                    println!("🦀 write: File not found! 🦐");
+                    continue;
+                }
+                let file_inode = file_inode.unwrap();
+
+                // 读一串内容 不换行
+                //
+                let mut size = file_inode.file_size();
+                // 如果 next 不是数字
+                let next = input.next().unwrap();
+                if next.parse::<usize>().is_err() {
+                    // 如果是 "a" 则追加 append
+                    if next == "-a" {
+                        let context = input.next().unwrap();
+                        file_inode.write(context.as_bytes(), fat32::file::WriteType::Append);
+                    } else {
+                        // 那么就是写入整个文件: offset = 0, content = 第一个参数
+                        let content = next;
+                        file_inode.write(content.as_bytes(), fat32::file::WriteType::OverWritten);
+                    }
+                } else {
+                    // 如果 next 是数字
+                    // 那么就是写入文件的一部分: offset = 第一个参数, content = 第二个参数
+                    let offset = next.parse::<usize>().unwrap();
+                    let content = input.next().unwrap_or("");
+                    if offset > size {
+                        println!("🦀 write: Offset is out of range! 🦐");
+                        continue;
+                    }
+                    file_inode.write_at(offset, content.as_bytes());
+                };
+            }
+
             // simple: get size of files
             "stat" => {
                 let file_name = input.next();
@@ -361,7 +445,7 @@ fn fs_pack() -> std::io::Result<()> {
                 }
                 let name = file_name.unwrap();
                 let file_name: Vec<&str> = name.split('/').collect();
-                let file_inode = curr_folder_inode.find_by_path(file_name);
+                let file_inode = curr_folder_inode.find(file_name);
                 if file_inode.is_none() {
                     println!("🦀 stat: File not found! 🦐");
                     continue;
@@ -383,14 +467,14 @@ fn fs_pack() -> std::io::Result<()> {
             "get" => {
                 for file in curr_folder_inode.ls().unwrap() {
                     // 从easy-fs中读取文件
-                    let name = file.0;
+                    let name = file;
                     println!("🐬 Get {} from easy-fs.", name);
                     let file_name: Vec<&str> = name.split('/').collect();
-                    let file_inode = curr_folder_inode.find_by_path(file_name).unwrap();
+                    let file_inode = curr_folder_inode.find(file_name).unwrap();
                     let mut all_data: Vec<u8> = vec![0; file_inode.file_size() as usize];
                     file_inode.read_at(0, &mut all_data);
                     // 写入文件 保存到host文件系统中
-                    let mut target_file = File::create(format!(
+                    let mut target_file = StdFile::create(format!(
                         "{}{} {}",
                         target_path,
                         format!("{}", {
@@ -421,7 +505,7 @@ fn fs_pack() -> std::io::Result<()> {
                 for file in files {
                     // 从host文件系统中读取文件
                     println!("🐳 Set {}{} to easy-fs.", src_path, file);
-                    let mut host_file = File::open(format!("{}{}", src_path, file)).unwrap();
+                    let mut host_file = StdFile::open(format!("{}{}", src_path, file)).unwrap();
                     let mut all_data: Vec<u8> = Vec::new();
                     host_file.read_to_end(&mut all_data).unwrap();
                     // 创建文件
@@ -446,9 +530,9 @@ fn fs_pack() -> std::io::Result<()> {
                 loop {
                     let all_files_name = curr_folder_inode.ls().unwrap();
                     for file_name in all_files_name {
-                        let name = file_name.0;
+                        let name = file_name;
                         let file_name: Vec<&str> = name.split('/').collect();
-                        let inode = Arc::new(curr_folder_inode.find_by_path(file_name).unwrap());
+                        let inode = Arc::new(curr_folder_inode.find(file_name).unwrap());
                         files.push(Arc::clone(&inode));
                         if inode.is_dir() {
                             folder.push(Arc::clone(&inode));
@@ -491,7 +575,7 @@ fn fs_pack() -> std::io::Result<()> {
                     }
                     let file_name = file.unwrap();
                     let file_name: Vec<&str> = file_name.split('/').collect();
-                    curr_folder_inode.delete_by_path(file_name);
+                    curr_folder_inode.remove(file_name);
 
                     file = input.next();
                 }

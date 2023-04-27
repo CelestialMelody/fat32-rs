@@ -3,10 +3,10 @@ use fat32::BlockDeviceError;
 use fat32::BLOCK_SIZE;
 
 use spin::RwLock;
-use std::fs::File;
+use std::fs::File as StdFile;
 use std::io::{Read, Seek, SeekFrom, Write};
 
-pub struct BlockFile(pub RwLock<File>);
+pub struct BlockFile(pub RwLock<StdFile>);
 
 impl BlockDevice for BlockFile {
     /// Read block from BlockDevice
