@@ -1,16 +1,18 @@
-#![no_std]
+// #![no_std]
 pub mod bpb;
 pub mod cache;
 pub mod device;
+pub mod dir;
 pub mod entry;
 pub mod fat;
+pub mod file;
 pub mod fs;
 pub mod vfs;
 
-// use crate::dir::DirError;
+use crate::dir::DirError;
 use crate::entry::NameType;
 use crate::fat::ClusterChainErr;
-// use crate::file::FileError;
+use crate::file::FileError;
 
 use core::convert::TryInto;
 use core::str;
@@ -49,7 +51,7 @@ pub const DIRENT_SIZE: usize = 32;
 pub const LONG_NAME_LEN: u32 = 13;
 pub const STRAT_CLUSTER_IN_FAT: u32 = 2;
 pub const NEW_VIR_FILE_CLUSTER: u32 = 0;
-// 持久化根目录的不得已行为；TODO 实际上只要能够知道根目录大小就行
+// 持久化根目录的不得已行为; TODO 实际上只要能够知道根目录大小就行
 pub const ROOT_DIR_ENTRY_CLUSTER: u32 = 3;
 pub const BLOCK_CACHE_LIMIT: usize = 64;
 
@@ -100,7 +102,7 @@ pub const MAX_CLUSTER_FAT16: usize = 65525;
 pub const MAX_CLUSTER_FAT32: usize = 268435445;
 
 /// The two reserved clusters at the start of the FAT, and FAT[1] high bit mask as follows:
-/// Bit ClnShutBitMask -- If bit is 1, volume is “clean”. If bit is 0, volume is “dirty”.
+/// Bit ClnShutBitMask -- If bit is 1, volume is "clean". If bit is 0, volume is "dirty".
 /// Bit HrdErrBitMask  -- If this bit is 1, no disk read/write errors were encountered.
 ///                       If this bit is 0, the file system driver encountered a disk I/O error on the Volume
 ///                       the last time it was mounted, which is an indicator that some sectors may have gone bad on the volume.
@@ -112,8 +114,8 @@ type Error = BlockDeviceError;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BlockDeviceError {
     ClusterChain(ClusterChainErr),
-    // Dir(DirError),
-    // File(FileError),
+    Dir(DirError),
+    File(FileError),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -203,13 +205,13 @@ pub(crate) fn get_needed_sector(value: usize) -> usize {
     }
 }
 
-/// 将长文件名拆分，返回字符串数组
+/// 将长文件名拆分, 返回字符串数组
 pub fn long_name_split(name: &str) -> Vec<[u16; 13]> {
     let mut name: Vec<u16> = name.encode_utf16().collect();
     let len = name.len() as u32; // 注意: 要有 \0
 
-    // 计算需要几个目录项，向上取整
-    // 以 13个字符为单位进行切割，每一组占据一个目录项
+    // 计算需要几个目录项, 向上取整
+    // 以 13个字符为单位进行切割, 每一组占据一个目录项
     let lfn_cnt = (len + LONG_NAME_LEN - 1) / LONG_NAME_LEN;
     if len < lfn_cnt * LONG_NAME_LEN {
         name.push(0x00);
@@ -272,8 +274,8 @@ pub fn generate_short_name(long_name: &str) -> String {
     let name = name_.as_bytes();
     let extension = ext_.as_bytes();
     let mut short_name = String::new();
-    // 取长文件名的前6个字符加上"~1"形成短文件名，扩展名不变，
-    // 目前不支持重名，即"~2""~3"; 支持重名与在目录下查找文件的方法绑定
+    // 取长文件名的前6个字符加上"~1"形成短文件名, 扩展名不变,
+    // 目前不支持重名, 即"~2""~3"; 支持重名与在目录下查找文件的方法绑定
     for i in 0..6 {
         short_name.push((name[i] as char).to_ascii_uppercase())
     }

@@ -10,9 +10,9 @@
 //! FAT Data Structure
 //!
 //! The next data structure that is important is the FAT itself. What this data structure does is define a
-//! singly linked list of the “extents” (clusters) of a file. Note at this point that a FAT directory or file
+//! singly linked list of the "extents" (clusters) of a file. Note at this point that a FAT directory or file
 //! container is nothing but a regular file that has a special attribute indicating it is a directory. The only
-//! other special thing about a directory is that the data or contents of the “file” is a series of 32=byte FAT
+//! other special thing about a directory is that the data or contents of the "file" is a series of 32=byte FAT
 //! directory entries (see discussion below). In all other respects, a directory is just like a file. The FAT
 //! maps the data region of the volume by cluster number. The first data cluster is cluster 2.
 //!
@@ -41,10 +41,10 @@
 //!
 //! Another feature on FAT32 volumes that is not present on FAT16/FAT12 is the BPB_BkBootSec field.
 //! FAT16/FAT12 volumes can be totally lost if the contents of sector 0 of the volume are overwritten or
-//! sector 0 goes bad and cannot be read. This is a “single point of failure” for FAT16 and FAT12
+//! sector 0 goes bad and cannot be read. This is a "single point of failure" for FAT16 and FAT12
 //! volumes. The BPB_BkBootSec field reduces the severity of this problem for FAT32 volumes, because
-//! starting at that sector number on the volume—6—there is a backup copy of the boot sector
-//! information including the volume’s BPB.
+//! starting at that sector number on the volume-6-there is a backup copy of the boot sector
+//! information including the volume's BPB.
 
 //! FAT File System Layout:
 //!      Boot Sector - Reserved Sectors - FAT1 - FAT2 - (FAT32 without Root Directory Region) - Data Region
@@ -89,7 +89,7 @@
 //! associated with this first cluster number, and the location of that data on the volume is computed from
 //! the cluster number as described earlier (computation of FirstSectorofCluster).
 //!
-//! Note that a zero-length file—a file that has no data allocated to it—has a first cluster number of 0
+//! Note that a zero-length file-a file that has no data allocated to it-has a first cluster number of 0
 //! placed in its directory entry. This cluster location in the FAT (see earlier computation of
 //! ThisFATSecNum and ThisFATEntOffset) contains either an EOC mark (End Of Clusterchain) or the
 //! cluster number of the next cluster of the file. The EOC value is FAT type dependant (assume
@@ -98,10 +98,10 @@
 //! Note that the cluster number whose cluster entry in the FAT contains the EOC mark is allocated to the
 //! file and is also the last cluster allocated to the file.
 //!
-//! There is also a special “BAD CLUSTER” mark. Any cluster that contains the “BAD CLUSTER”
+//! There is also a special "BAD CLUSTER" mark. Any cluster that contains the "BAD CLUSTER"
 //! value in its FAT entry is a cluster that should not be placed on the free list because it is prone to disk
-//! errors. The “BAD CLUSTER” value is 0x0FF7 for FAT12, 0xFFF7 for FAT16, and 0x0FFFFFF7 for
-//! FAT32. The other relevant note here is that these bad clusters are also lost clusters—clusters that
+//! errors. The "BAD CLUSTER" value is 0x0FF7 for FAT12, 0xFFF7 for FAT16, and 0x0FFFFFF7 for
+//! FAT32. The other relevant note here is that these bad clusters are also lost clusters-clusters that
 //! appear to be allocated because they contain a non-zero value but which are not part of any files
 //! allocation chain. Disk repair utilities must recognize lost clusters that contain this special value as bad
 //! clusters and not change the content of the cluster entry.
@@ -120,7 +120,7 @@
 //! other bits, are always left set to 1). Note that the bit location is different for FAT16 and FAT32,
 //! because they are the high 2 bits of the entry.
 //!
-//! Bit ClnShutBitMask -- If bit is 1, volume is “clean”. If bit is 0, volume is “dirty”.
+//! Bit ClnShutBitMask -- If bit is 1, volume is "clean". If bit is 0, volume is "dirty".
 //! Bit HrdErrBitMask  -- If this bit is 1, no disk read/write errors were encountered.
 //!     If this bit is 0, the file system driver encountered a disk I/O error on the Volume
 //!     the last time it was mounted, which is an indicator that some sectors may have gone bad on the volume.
@@ -136,12 +136,12 @@
 //!    to be. In other words, there may be totally unused FAT sectors at the end of each FAT in the
 //!    FAT region of the volume. For this reason, the last sector of the FAT is always computed
 //!    using the CountofClusters + 1 value, never from the BPB_FATSz16/32 value. FAT code
-//!    should not make any assumptions about what the contents of these “extra” FAT sectors are.
+//!    should not make any assumptions about what the contents of these "extra" FAT sectors are.
 //!    FAT format code should zero the contents of these extra FAT sectors though.
 //!
 //! FAT Volume Initialization
 //!
-//! Given that the FAT type (FAT12, FAT16, or FAT32) is dependant on the number of clusters -— and that
+//! Given that the FAT type (FAT12, FAT16, or FAT32) is dependant on the number of clusters -- and that
 //! the sectors available in the data area of a FAT volume is dependant on the size of the FAT --
 //! when handed an unformatted volume that does not yet have a BPB, how do you determine all this and
 //! compute the proper values to put in BPB_SecPerClus and either BPB_FATSz16 or BPB_FATSz32?
@@ -174,6 +174,8 @@
 // 2. FAT1 起始地址 = 保留扇区数 * 扇区大小
 // 3. 文件分配表区共保存了两个相同的文件分配表, 因为文件所占用的存储空间 (簇链) 及空闲空间的管理都是通过FAT实现的, 保存两个以便第一个损坏时, 还有第二个可用
 
+// #![allow(unused)]
+
 use super::{
     LEAD_SIGNATURE, MAX_CLUSTER_FAT12, MAX_CLUSTER_FAT16, STRUCT_SIGNATURE, TRAIL_SIGNATURE,
 };
@@ -182,7 +184,7 @@ use super::{
 /// *On-disk* data structure for partition information.
 #[derive(Debug, Copy, Clone)]
 // repr(packed) 表示使用紧凑的表示方式来表示一个结构体或枚举, 编译器不会在字段间填充字节
-// 使用 #[repr(packed)] 属性可能会导致访问未对齐的内存，这可能会导致不可预测的结果，例如内存访问异常、程序崩溃等
+// 使用 #[repr(packed)] 属性可能会导致访问未对齐的内存, 这可能会导致不可预测的结果, 例如内存访问异常, 程序崩溃等
 #[repr(packed)]
 pub struct BIOSParameterBlock {
     pub(crate) basic_bpb: BasicBPB, // size = 36B
@@ -204,6 +206,7 @@ impl BIOSParameterBlock {
     pub fn offset(&self, cluster: u32) -> usize {
         // Q: why cluster - 2?
         // A: The first two clusters are reserved and the first data cluster is 2.
+        assert!(cluster >= 2);
         ((self.basic_bpb.rsvd_sec_cnt as usize)
             + (self.basic_bpb.num_fats as usize) * (self.bpb32.fat_sz32 as usize)
             + (cluster as usize - 2) * (self.basic_bpb.sec_per_clus as usize))
@@ -398,7 +401,7 @@ pub struct BasicBPB {
     /// Sector per cluster. Number of sectors per allocation unit. This value
     /// must be a power of 2 that is greater than 0. The legal values are
     /// 1, 2, 4, 8, 16, 32, 64, and 128.Note however, that a value should
-    /// never be used that results in a “bytes per cluster” value
+    /// never be used that results in a "bytes per cluster" value
     /// (BPB_BytsPerSec * BPB_SecPerClus) greater than 32K (32 * 1024).
     /// Usually 8 for SD card.
     ///
@@ -435,7 +438,7 @@ pub struct BasicBPB {
     //  扇区总数 (给FAT12/16使用)    大小: 2字节    值: 0 (0x00)   偏移: 0x13
     pub(crate) tot_sec16: u16,
     /// Used to denote the media type. This is a legacy field that is no longer
-    /// in use. 0xF8 is the standard value for “fixed” (non-removable) media.
+    /// in use. 0xF8 is the standard value for "fixed" (non-removable) media.
     /// For removable media, 0xF0 is frequently used. The legal values for this
     /// field are: 0xF0, 0xF8, 0xF9, 0xFA, 0xFB, 0xFC, 0xFD, 0xFE, and 0xFF.
     /// The only other important point is that whatever value is put in here must
@@ -460,7 +463,7 @@ pub struct BasicBPB {
     pub(crate) sec_per_trk: u16,
     /// Number of heads for interrupt 0x13.
     /// This field is relevant as discussed earlier for BPB_SecPerTrk.
-    /// This field contains the one based “count of heads”.
+    /// This field contains the one based "count of heads".
     /// Not needed by SD card.
     ///
     /// Number of heads    Size: 2 bytes    Value: 0 (0x00)    Offset: 0x1A
@@ -485,24 +488,6 @@ pub struct BasicBPB {
     //
     //  扇区总数 (给FAT32使用)    大小: 4字节    值: non-zero   偏移: 0x20
     pub(crate) tot_sec32: u32,
-}
-
-impl BasicBPB {
-    pub(crate) fn bytes_per_sector(&self) -> u32 {
-        self.byts_per_sec as u32
-    }
-    pub(crate) fn sector_per_cluster(&self) -> u32 {
-        self.sec_per_clus as u32
-    }
-    pub(crate) fn fat_cnt(&self) -> u32 {
-        self.num_fats as u32
-    }
-    pub(crate) fn reserved_sector_cnt(&self) -> u32 {
-        self.rsvd_sec_cnt as u32
-    }
-    pub(crate) fn total_sector_cnt(&self) -> u32 {
-        self.tot_sec32
-    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -562,10 +547,10 @@ pub struct BPB32 {
     pub(crate) fs_info: u16,
     /// The sector number in the reserved area of the volume of
     /// a copy of the boot record. Usually 6.
-    /// The case—sector 0 goes bad—is the reason why no value other than 6 should ever be placed
-    /// in the BPB_BkBootSec field. If sector 0 is unreadable, various operating systems are “hard wired” to
+    /// The case-sector 0 goes bad-is the reason why no value other than 6 should ever be placed
+    /// in the BPB_BkBootSec field. If sector 0 is unreadable, various operating systems are "hard wired" to
     /// check for backup boot sector(s) starting at sector 6 of the FAT32 volume. Note that starting at the
-    /// BPB_BkBootSec sector is a complete boot record. The Microsoft FAT32 “boot sector” is actually
+    /// BPB_BkBootSec sector is a complete boot record. The Microsoft FAT32 "boot sector" is actually
     /// three 512-byte sectors long. There is a copy of all three of these sectors starting at the
     /// BPB_BkBootSec sector. A copy of the FSInfo sector is also there, even though the BPB_FSInfo field
     /// in this backup boot sector is set to the same value as is stored in the sector 0 BPB.
@@ -634,18 +619,6 @@ pub struct BPB32 {
     //
     //  文件系统类型    大小: 8字节    值: "FAT32   "    偏移: 0x52
     pub(crate) bs_fil_sys_type: [u8; 8],
-}
-
-impl BPB32 {
-    // Number of sectors occupied by FAT
-    pub(crate) fn sector_per_fat(&self) -> u32 {
-        self.fat_sz32
-    }
-
-    // Get the sector number of FSInfo
-    pub(crate) fn fat_info_sector(&self) -> u32 {
-        self.fs_info as u32
-    }
 }
 
 #[derive(Debug, Clone, Copy)]

@@ -25,9 +25,9 @@
 //!   system code to think that the entry is free.
 //!
 //! The DIR_Name field is actually broken into two parts+ the 8-character main part of the name, and the
-//! 3-character extension. These two parts are “trailing space padded” with bytes of 0x20.
+//! 3-character extension. These two parts are "trailing space padded" with bytes of 0x20.
 //!
-//! DIR_Name[0] may not equal 0x20. There is an implied ‘.’ character between the main part of the
+//! DIR_Name[0] may not equal 0x20. There is an implied '.' character between the main part of the
 //! name and the extension part of the name that is not present in DIR_Name. Lower case characters are
 //! not allowed in DIR_Name (what these characters are is country specific).
 //!
@@ -39,7 +39,7 @@
 //! See [`ShortDirEntry::is_valid()`].
 //!
 //! FAT file system on disk data structure is all "little endian".
-//! This is important if your machine is a “big endian” machine, because you will have to translate
+//! This is important if your machine is a "big endian" machine, because you will have to translate
 //! between big and little endian as you move data to and from the disk.
 
 //! When a directory is created, a file with the ATTR_DIRECTORY bit set in its DIR_Attr field, you set
@@ -103,7 +103,7 @@
 //! long entries contain the long name of a file. The name contained in a short entry which is associated
 //! with a set of long entries is termed the alias name, or simply alias, of the file.
 
-//！Storage of a Long-Name Within Long Directory Entries
+//!Storage of a Long-Name Within Long Directory Entries
 //!
 //! A long name can consist of more characters than can fit in a single long directory entry. When this
 //! occurs the name is stored in more than one long entry. In any event, the name fields themselves
@@ -189,6 +189,8 @@
 //! FAT Long Directory Entries
 //!
 
+// #![allow(unused)]
+
 use super::VirFileType;
 use super::{
     ATTR_ARCHIVE, ATTR_DIRECTORY, ATTR_HIDDEN, ATTR_LONG_NAME, ATTR_READ_ONLY, ATTR_SYSTEM,
@@ -198,7 +200,7 @@ use super::{
 
 use alloc::string::{String, ToString};
 use core::fmt::Debug;
-use core::{fmt, str};
+use core::str;
 
 #[derive(PartialEq, Debug, Clone, Copy)]
 #[repr(u8)]
@@ -210,7 +212,7 @@ pub enum FATAttr {
     /// Indicates that this is an operating system file.
     AttrSystem = ATTR_SYSTEM, // 系统
     /// Root Dir
-    /// There should only be one “file” on the volume that has this attribute
+    /// There should only be one "file" on the volume that has this attribute
     /// set, and that file must be in the root directory. This name of this file is
     /// actually the label for the volume. DIR_FstClusHI and
     /// DIR_FstClusLO must always be 0 for the volume label (no data
@@ -223,7 +225,7 @@ pub enum FATAttr {
     /// utilities may use this attribute to indicate which files on the volume
     /// have been modified since the last time that a backup was performed.
     AttrArchive = ATTR_ARCHIVE, // 归档
-    /// Idicates that the “file” is actually part of the long name entry for some other file.
+    /// Idicates that the "file" is actually part of the long name entry for some other file.
     AttrLongName = ATTR_LONG_NAME, // 长文件名
 }
 
@@ -246,7 +248,7 @@ pub struct ShortDirEntry {
     ///
     /// size: 1 byte      offset: 11 Bytes (0xB)
     //
-    //  描述文件的属性，该字段在短文件中不可取值 0x0F (标志是长文件)
+    //  描述文件的属性, 该字段在短文件中不可取值 0x0F (标志是长文件)
     attr: u8,
     // attr: FATAttr,
     /// Reserved for Windows NT
@@ -270,8 +272,8 @@ pub struct ShortDirEntry {
     ///
     /// size: 2 bytes     offset: 14 Bytes (0xE ~ 0xF)
     //
-    //  文件创建的时间: 时-分-秒，16bit 被划分为 3个部分:
-    //    0~4bit 为秒, 以 2秒为单位，有效值为 0~29，可以表示的时刻为 0~58
+    //  文件创建的时间: 时-分-秒, 16bit 被划分为 3个部分:
+    //    0~4bit 为秒, 以 2秒为单位, 有效值为 0~29, 可以表示的时刻为 0~58
     //    5~10bit 为分, 有效值为 0~59
     //    11~15bit 为时, 有效值为 0~23
     crt_time: u16,
@@ -282,7 +284,7 @@ pub struct ShortDirEntry {
     //  文件创建日期, 16bit 也划分为三个部分:
     //    0~4bit 为日, 有效值为 1~31
     //    5~8bit 为月, 有效值为 1~12
-    //    9~15bit 为年, 有效值为 0~127，这是一个相对于 1980 年的年数值 (该值加上 1980 即为文件创建的日期值 (1980–2107))
+    //    9~15bit 为年, 有效值为 0~127, 这是一个相对于 1980 年的年数值 (该值加上 1980 即为文件创建的日期值 (1980–2107))
     crt_date: u16,
     /// Last access date
     /// Note that there is no last access time, only a
@@ -318,7 +320,7 @@ pub struct ShortDirEntry {
     /// (directories are sized by simply following their cluster chains to the EOC mark).
     /// size: 4 bytes     offset: 28 Bytes (0x1C~0x1F)
     //
-    //  文件内容大小字节数，只对文件有效，子目录的目录项此处全部设置为 0
+    //  文件内容大小字节数, 只对文件有效, 子目录的目录项此处全部设置为 0
     file_size: u32,
 }
 
@@ -381,7 +383,7 @@ impl ShortDirEntry {
         //
         // to_le_bytes() 方法将 u32 类型的数据转换为 小端序 的字节数组
         // eg. 0x12345678 -> [0x78, 0x56, 0x34, 0x12]
-        let mut cluster: [u8; 4] = cluster.to_le_bytes();
+        let cluster: [u8; 4] = cluster.to_le_bytes();
 
         // 0x1A~0x1B 字节为文件内容起始簇号的低两个字节, 与 0x14~0x15 字节处的高两个字节组成文件内容起始簇号
         item[0x14..0x16].copy_from_slice(&cluster[2..4]);
@@ -445,7 +447,8 @@ impl ShortDirEntry {
         //     }
         // }
         for i in 0..11 {
-            sum = ((sum & 1) << 7) + (sum >> 1) + self.name[i];
+            // fix
+            sum = ((sum & 1) << 7) + (sum >> 1) + name_[i];
         }
         sum
     }
@@ -763,7 +766,7 @@ pub struct LongDirEntry {
     //  如果该长文件名目录项对应的文件或子目录被删除, 则将该字节设置成删除标志0xE5.
     //
     //  Mask(0x40)针对同一个文件中的 ord, 一个长目录项的长文件名仅有 13 个 unicode字符,
-    //  当文件名超过13个字符时，需要多个长目录项
+    //  当文件名超过13个字符时, 需要多个长目录项
     ord: u8,
     /// Characters 1-5 of the long-name sub-component in this dir entry.
     /// CharSet: Unicode. Codeing: UTF-16LE
@@ -828,7 +831,6 @@ impl LongDirEntry {
                 .write_unaligned(name_array[11..].try_into().expect("Failed to cast!"));
         }
 
-        debug_assert!(order < LAST_LONG_ENTRY);
         lde.ord = order;
         lde.chk_sum = check_sum;
 
@@ -978,8 +980,8 @@ impl LongDirEntry {
                 // UTF-8 编码的规则:
                 // 如果代码点在 0x80 以下 (即 ASCII 字符), 则使用 1 个字节的编码表示, 即 0xxxxxxx (其中 x 表示可用的位)
                 // 如果代码点在 0x80 到 0x7FF 之间, 则使用 2 个字节的编码表示, 即 110xxxxx 10xxxxxx.
-                // 如果代码点在 0x800 到 0xFFFF 之间, 则使用 3 个字节的编码表示，即 1110xxxx 10xxxxxx 10xxxxxx
-                // 如果代码点在 0x10000 到 0x10FFFF 之间, 则使用 4 个字节的编码表示，即 11110xxx 10xxxxxx 10xxxxxx 10xxxxxx
+                // 如果代码点在 0x800 到 0xFFFF 之间, 则使用 3 个字节的编码表示, 即 1110xxxx 10xxxxxx 10xxxxxx
+                // 如果代码点在 0x10000 到 0x10FFFF 之间, 则使用 4 个字节的编码表示, 即 11110xxx 10xxxxxx 10xxxxxx 10xxxxxx
                 if unicode <= 0x007F {
                     utf8[len] = unicode as u8;
                     len += 1;
@@ -1044,404 +1046,6 @@ impl LongDirEntry {
 
     pub fn as_bytes_mut(&mut self) -> &mut [u8] {
         unsafe { core::slice::from_raw_parts_mut(self as *mut Self as *mut u8, 32) }
-    }
-}
-
-#[derive(PartialEq, Debug, Clone, Copy, PartialOrd)]
-pub enum EntryType {
-    Dir,
-    File,
-    LFN, // Long File Name
-    Deleted,
-}
-
-impl Default for EntryType {
-    fn default() -> Self {
-        EntryType::Dir
-    }
-}
-
-impl EntryType {
-    fn from_value(value: u8) -> EntryType {
-        if (value & ATTR_DIRECTORY) == ATTR_DIRECTORY {
-            EntryType::Dir
-        } else if value == ATTR_LONG_NAME {
-            EntryType::LFN
-        } else {
-            EntryType::File
-        }
-    }
-
-    fn from_create(value: VirFileType) -> EntryType {
-        match value {
-            VirFileType::Dir => EntryType::Dir,
-            VirFileType::File => EntryType::File,
-        }
-    }
-}
-
-#[derive(Default, Copy, Clone)]
-/// Why use Option<ShortDirEntry>?
-///
-/// We know that there is only one short directory entry, while for long directory entries,
-/// when the Unicode character length exceeds 13, multiple long directory entries are required
-/// to save the file name. Therefore, when designing the Entry here, it is believed that the
-/// directory item may be a long or a short directory entry, so Option<T> is used for both.
-///
-/// TODO
-///
-/// So, what we should deal with is that:
-/// - How to handle file names?
-/// - How to associate directory entries of the same file?
-pub struct Entry {
-    pub(crate) item_type: EntryType,
-    pub(crate) sde: Option<ShortDirEntry>,
-    pub(crate) lde: Option<LongDirEntry>,
-}
-
-impl Entry {
-    pub(crate) fn first_cluster(&self) -> u32 {
-        self.sde.unwrap().first_cluster()
-    }
-
-    pub(crate) fn set_first_cluster(&mut self, cluster: u32) {
-        self.sde.as_mut().unwrap().set_first_cluster(cluster);
-    }
-
-    fn sfn_bytes_array(&self) -> Option<([u8; 12], usize)> {
-        if self.sde.is_some() {
-            Some(self.sde.as_ref().unwrap().name_bytes_array_with_dot())
-        } else {
-            None
-        }
-    }
-
-    fn short_file_name(&self) -> Option<String> {
-        if self.sde.is_some() {
-            Some(self.sde.as_ref().unwrap().name())
-        } else {
-            None
-        }
-    }
-
-    fn lfn_to_utf8_bytes_array(&self) -> Option<([u8; 13 * 3], usize)> {
-        if self.lde.is_some() {
-            Some(self.lde.as_ref().unwrap().name_to_utf8())
-        } else {
-            None
-        }
-    }
-
-    fn long_file_name(&self) -> Option<String> {
-        if self.lde.is_some() {
-            Some(self.lde.as_ref().unwrap().name())
-        } else {
-            None
-        }
-    }
-
-    pub(crate) fn lde_order(&self) -> Option<usize> {
-        if self.lde.is_some() {
-            Some(self.lde.as_ref().unwrap().lde_order())
-        } else {
-            None
-        }
-    }
-
-    pub(crate) fn is_lde_end(&self) -> Option<bool> {
-        if self.lde.is_some() {
-            Some(self.lde.as_ref().unwrap().is_lde_end())
-        } else {
-            None
-        }
-    }
-
-    pub(crate) fn file_size(&self) -> Option<usize> {
-        if self.sde.is_some() {
-            Some(self.sde.as_ref().unwrap().file_size() as usize)
-        } else {
-            None
-        }
-    }
-
-    pub(crate) fn to_bytes_array(&self) -> [u8; 32] {
-        if self.sde.is_some() {
-            self.sde.as_ref().unwrap().to_bytes_array()
-        } else {
-            self.lde.as_ref().unwrap().to_bytes_array()
-        }
-    }
-
-    pub(crate) fn sde_to_bytes_array(&self) -> Option<[u8; 32]> {
-        self.sde.map(|sde| sde.to_bytes_array())
-    }
-
-    pub(crate) fn lde_to_bytes_array(&self) -> Option<[u8; 32]> {
-        self.lde.map(|lde| lde.to_bytes_array())
-    }
-
-    pub(crate) fn new_lfn_str(order: u8, check_sum: u8, name: &str) -> Self {
-        Self {
-            item_type: EntryType::LFN,
-            sde: None,
-            lde: Some(LongDirEntry::new(order, check_sum, name)),
-        }
-    }
-
-    pub(crate) fn new_sfn_str(cluster: u32, name: &str, create_type: VirFileType) -> Self {
-        Self {
-            item_type: EntryType::from_create(create_type),
-            sde: Some(ShortDirEntry::new_form_name_str(cluster, name, create_type)),
-            lde: None,
-        }
-    }
-
-    pub(crate) fn new_sfn_bytes(cluster: u32, name: &[u8], create_type: VirFileType) -> Self {
-        Self {
-            item_type: EntryType::from_create(create_type),
-            sde: Some(ShortDirEntry::new_from_name_bytes(
-                cluster,
-                name,
-                create_type,
-            )),
-            lde: None,
-        }
-    }
-
-    pub(crate) fn root_dir(cluster: u32) -> Self {
-        Self {
-            sde: Some(ShortDirEntry::root_dir(cluster)),
-            ..Self::default()
-        }
-    }
-
-    pub(crate) fn from_buf(buf: &[u8]) -> Self {
-        let item_type = if buf[0x00] == 0xE5 {
-            EntryType::Deleted
-        } else {
-            EntryType::from_value(buf[0x0B])
-        };
-
-        match item_type {
-            EntryType::LFN => Self {
-                item_type,
-                sde: None,
-                lde: Some(LongDirEntry::new_form_bytes(buf)),
-            },
-            _ => Self {
-                item_type,
-                sde: Some(ShortDirEntry::new_from_bytes(buf)),
-                lde: None,
-            },
-        }
-    }
-
-    pub(crate) fn sfn_equal(&self, name: &str) -> bool {
-        if self.is_deleted() {
-            return false;
-        }
-        let option = self.sfn_bytes_array();
-        if option.is_none() {
-            return false;
-        }
-        let (bytes, len) = option.unwrap();
-        if let Ok(res) = str::from_utf8(&bytes[0..len]) {
-            name.eq_ignore_ascii_case(res)
-        } else {
-            false
-        }
-    }
-
-    pub(crate) fn lfn_equal(&self, name: &str) -> bool {
-        if self.is_deleted() {
-            return false;
-        }
-        let option = self.lfn_to_utf8_bytes_array();
-        if option.is_none() {
-            return false;
-        }
-        let (bytes, len) = option.unwrap();
-        if let Ok(res) = str::from_utf8(&bytes[0..len]) {
-            name.eq_ignore_ascii_case(res)
-        } else {
-            false
-        }
-    }
-
-    pub(crate) fn set_file_size(&mut self, size: usize) {
-        self.sde.as_mut().unwrap().set_file_size(size as u32)
-    }
-
-    pub(crate) fn is_lfn(&self) -> bool {
-        EntryType::LFN == self.item_type
-    }
-
-    pub(crate) fn is_deleted(&self) -> bool {
-        EntryType::Deleted == self.item_type
-    }
-
-    pub(crate) fn is_dir(&self) -> bool {
-        EntryType::Dir == self.item_type
-    }
-
-    pub(crate) fn is_file(&self) -> bool {
-        EntryType::File == self.item_type
-    }
-
-    pub(crate) fn check_sum(&self) -> Option<u8> {
-        if self.lde.is_some() {
-            Some(self.lde.as_ref().unwrap().check_sum())
-        } else if self.sde.is_some() {
-            Some(self.sde.as_ref().unwrap().gen_check_sum())
-        } else {
-            None
-        }
-    }
-}
-
-impl Entry {
-    pub fn gen_short_name_numtail() {
-        todo!()
-    }
-    /// Embedded spaces within a long name are allowed.
-    /// Leading and trailing spaces in a long name are ignored.
-    /// Leading and embedded periods are allowed in a name and are stored in the long name.
-    /// Trailing periods are ignored.
-    /// No '~' or trailing numbers
-    pub fn gen_short_name_prefix() {
-        todo!()
-    }
-
-    pub fn set_sde_create_time(&mut self, time: u16) {
-        if self.sde.is_some() {
-            self.sde.as_mut().unwrap().set_create_time(time);
-        }
-    }
-
-    pub fn set_sde_create_date(&mut self, date: u16) {
-        if self.sde.is_some() {
-            self.sde.as_mut().unwrap().set_create_date(date);
-        }
-    }
-
-    pub fn set_sde_last_access_date(&mut self, date: u16) {
-        if self.sde.is_some() {
-            self.sde.as_mut().unwrap().set_last_access_date(date);
-        }
-    }
-
-    pub fn set_sde_last_write_time(&mut self, time: u16) {
-        if self.sde.is_some() {
-            self.sde.as_mut().unwrap().set_last_write_time(time);
-        }
-    }
-
-    pub fn set_sde_last_write_date(&mut self, date: u16) {
-        if self.sde.is_some() {
-            self.sde.as_mut().unwrap().set_last_write_date(date);
-        }
-    }
-
-    pub fn empty() -> Self {
-        Self {
-            item_type: EntryType::default(),
-            sde: Some(ShortDirEntry::empty()),
-            lde: Some(LongDirEntry::empty()),
-        }
-    }
-
-    pub fn unused_not_last_entry() -> Self {
-        let mut item = Self::empty();
-        item.sde.unwrap().as_bytes_array_mut()[0] = DIR_ENTRY_UNUSED;
-        item
-    }
-
-    pub fn unused_and_last_entry() -> Self {
-        let mut item = Self::empty();
-        item.sde.unwrap().as_bytes_array_mut()[0] = DIR_ENTRY_LAST_AND_UNUSED;
-        item
-    }
-
-    pub fn is_last_long_dir_entry(&self) -> Option<bool> {
-        if self.lde.is_some() {
-            Some(self.lde.unwrap().is_lde_end())
-        } else {
-            None
-        }
-    }
-
-    // TODO: more ways to set name
-    pub fn set_sde_name(&mut self, name: [u8; 11]) -> Option<bool> {
-        if self.sde.is_some() {
-            self.sde.unwrap().set_name(&name[..8], &name[8..]);
-            Some(true)
-        } else {
-            None
-        }
-    }
-
-    // TODO: more ways to set name
-    pub fn set_lde_name(&mut self, name: [u16; 13]) -> Option<bool> {
-        if self.lde.is_some() {
-            self.lde.unwrap().set_name(name);
-            Some(true)
-        } else {
-            None
-        }
-    }
-
-    // Check if is a unused entry
-    pub fn unused(&self) -> Option<bool> {
-        if self.unused_not_last().is_some() || self.last_and_unused().is_some() {
-            if self.unused_not_last().unwrap() || self.last_and_unused().unwrap() {
-                Some(true)
-            } else {
-                Some(false)
-            }
-        } else {
-            None
-        }
-    }
-    // Check if is a unused and not last entry, like a gap
-    pub fn unused_not_last(&self) -> Option<bool> {
-        if self.lde.is_some() {
-            if self.lde.unwrap().ord == DIR_ENTRY_UNUSED {
-                Some(true)
-            } else {
-                Some(false)
-            }
-        } else {
-            None
-        }
-    }
-    // Check if is a unused and last entry, marks the end of the directory file
-    pub fn last_and_unused(&self) -> Option<bool> {
-        if self.lde.is_some() {
-            if self.lde.unwrap().ord == DIR_ENTRY_LAST_AND_UNUSED {
-                Some(true)
-            } else {
-                Some(false)
-            }
-        } else {
-            None
-        }
-    }
-}
-
-impl Debug for Entry {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        if self.is_lfn() {
-            f.debug_struct("DirEntry")
-                .field("item_type", &self.item_type)
-                .field("sde(ShortDirEntry)", &self.sde.as_ref().unwrap().name())
-                .field("lde(LongDirEntry)", &self.lde.as_ref().unwrap().name())
-                .finish()
-        } else {
-            f.debug_struct("DirEntry")
-                .field("item_type", &self.item_type)
-                .field("sde(ShortDirEntry)", &self.sde.as_ref().unwrap().name())
-                .finish()
-        }
     }
 }
 

@@ -2,12 +2,15 @@ use alloc::sync::Arc;
 use alloc::vec::Vec;
 use spin::RwLock;
 
+use super::cache::get_block_cache;
+
 use super::bpb::{BIOSParameterBlock, BasicBPB, FSInfo, BPB32};
-use super::cache::{get_block_cache, Cache};
+use super::cache::Cache;
 use super::device::BlockDevice;
 use super::entry::ShortDirEntry;
 use super::fat::FATManager;
 use super::VirFileType;
+
 use super::{
     BLOCK_NUM, BLOCK_SIZE, END_OF_CLUSTER, FREE_CLUSTER, NEW_VIR_FILE_CLUSTER, ROOT,
     ROOT_DIR_ENTRY_CLUSTER, STRAT_CLUSTER_IN_FAT,
@@ -166,7 +169,7 @@ impl FileSystem {
             });
 
         let fat = FATManager::open(bpb.fat1_offset(), Arc::clone(&device));
-        let fat = FATManager::new(bpb.fat1_offset(), Arc::clone(&device));
+        // let fat = FATManager::new(bpb.fat1_offset(), Arc::clone(&device));
 
         let offset = bpb.offset(ROOT_DIR_ENTRY_CLUSTER);
         assert!(offset % BLOCK_SIZE == 0);
@@ -201,7 +204,7 @@ impl FileSystem {
         }
     }
 
-    // 成功返回第一个簇号，失败返回None
+    // 成功返回第一个簇号, 失败返回None
     pub fn alloc_cluster(&self, num: usize, start_cluster: u32) -> Option<u32> {
         let free_cluster_cnt = self.free_cluster_cnt();
         if free_cluster_cnt < num {
@@ -263,5 +266,9 @@ impl FileSystem {
         } else {
             0
         }
+    }
+
+    pub fn fat_read(&self, block_id: usize) -> [u8; BLOCK_SIZE] {
+        self.fat.read().read(block_id)
     }
 }

@@ -4,12 +4,14 @@
 //! 关于块/扇区/簇的变量命名:  block_id 在存储介质从 0 开始 从 0 编号, cluster_id 为从 数据区开始从 2 开始的簇号
 //! cluster 为从数据区开始的簇号, 从 2 开始编号, 其他命名尽量容易理解 如 block_id_in_cluster 为簇内块号
 
-use crate::cache::get_block_cache;
-use crate::cache::Cache;
-use crate::device::BlockDevice;
-use crate::read_le_u32;
-use crate::BLOCK_SIZE;
-use crate::END_OF_CLUSTER;
+use crate::NEW_VIR_FILE_CLUSTER;
+
+use super::cache::get_block_cache;
+use super::read_le_u32;
+
+use super::cache::Cache;
+use super::device::BlockDevice;
+use super::{BLOCK_SIZE, END_OF_CLUSTER};
 
 use alloc::collections::VecDeque;
 use alloc::sync::Arc;
@@ -51,6 +53,31 @@ pub struct ClusterChain {
     pub(crate) next_cluster: Option<u32>,
 }
 
+// impl ClusterChain {
+//     pub fn print(&self) {
+//         let mut clus_chian = self.clone();
+//         let mut op = clus_chian.next();
+//         while op.is_some() {
+//             clus_chian = op.unwrap();
+//             let cluster = clus_chian.current_cluster;
+//             println!("[cluster::print] cluster: {}", cluster);
+//             op = clus_chian.next();
+//         }
+//     }
+// }
+
+impl Debug for ClusterChain {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("ClusterChain")
+            .field("start_cluster", &self.start_cluster)
+            .field("current_cluster", &self.current_cluster)
+            .field("previous_cluster", &self.previous_cluster)
+            .field("next_cluster", &self.next_cluster)
+            .finish()
+    }
+}
+
+#[allow(unused)]
 impl ClusterChain {
     pub(crate) fn new(cluster: u32, device: Arc<dyn BlockDevice>, fat_offset: usize) -> Self {
         Self {
@@ -64,7 +91,7 @@ impl ClusterChain {
     }
 
     pub(crate) fn refresh(&mut self, start_cluster: u32) {
-        self.current_cluster = 0;
+        self.current_cluster = NEW_VIR_FILE_CLUSTER;
         self.start_cluster = start_cluster;
     }
 
@@ -100,7 +127,7 @@ impl Iterator for ClusterChain {
     // - next_cluster = None
     // - previous_cluster =
     fn next(&mut self) -> Option<Self::Item> {
-        if self.current_cluster == 0 {
+        if self.current_cluster == NEW_VIR_FILE_CLUSTER {
             // 对于 write_append 结合 refresh 有其他作用:
             // write_append 需要使用最后一个 fat 簇, 最后一个 fat 簇的 next_cluster 为 None.
             // 由于调用 refresh 时, current_cluster 为 0, start_cluster 为新建簇, 所以
@@ -167,11 +194,29 @@ pub struct FATManager {
 
 impl FATManager {
     pub fn open(fat_offset: usize, device: Arc<dyn BlockDevice>) -> Self {
+        // debug
+        // let block_id = fat_offset / BLOCK_SIZE;
+        // println!("fat table at block[{}]", block_id);
+        // get_block_cache(block_id, Arc::clone(&device))
+        //     .unwrap()
+        //     .read()
+        //     .read(0, |buf: &[u8; BLOCK_SIZE >> 3]| {
+        //         println!("[fat::open] fat table: {:?}", buf)
+        //     });
         Self {
             device: Arc::clone(&device),
             recycled_cluster: VecDeque::new(),
             fat1_offset: fat_offset,
         }
+    }
+
+    pub fn read(&self, block_id: usize) -> [u8; BLOCK_SIZE] {
+        let mut buffer = [0u8; BLOCK_SIZE];
+        self.device
+            .read_blocks(&mut buffer, self.fat1_offset + block_id * BLOCK_SIZE, 1)
+            .unwrap();
+        // println!("[fat::read] fat table at block[{}]: {:?}", block_id, buffer);
+        buffer
     }
 
     pub fn new(fat_offset: usize, device: Arc<dyn BlockDevice>) -> Self {
@@ -245,11 +290,15 @@ impl FATManager {
                 break;
             }
         }
+
+        // println!("[fat::find_blank_cluster] cluster: {}", cluster);
         cluster & END_OF_CLUSTER
     }
 
     pub fn blank_cluster(&mut self, start_from: u32) -> u32 {
         if let Some(cluster) = self.recycled_cluster.pop_front() {
+            // println!("recycled cluster: {}", cluster);
+
             cluster & END_OF_CLUSTER
         } else {
             self.find_blank_cluster(start_from)
@@ -257,6 +306,7 @@ impl FATManager {
     }
 
     pub fn recycle(&mut self, cluster: u32) {
+        // println!("recycle cluster: {}", cluster);
         self.recycled_cluster.push_back(cluster);
     }
 
@@ -268,11 +318,10 @@ impl FATManager {
 
         let option = get_block_cache(block_id, Arc::clone(&self.device));
 
-        let mut next_cluster = END_OF_CLUSTER;
+        let next_cluster: u32;
         if let Some(cache) = option {
             next_cluster = cache
                 .read()
-                // TODO 使用 & 与 不使用 & 的区别
                 .read(offset_in_block, |&next_cluster: &u32| next_cluster);
         } else {
             let mut buffer = [0u8; BLOCK_SIZE];
@@ -281,7 +330,7 @@ impl FATManager {
                 .unwrap();
             next_cluster = read_le_u32(&buffer[offset_in_block..offset_in_block + 4]);
         }
-
+        assert!(next_cluster >= 2);
         if next_cluster == END_OF_CLUSTER {
             None
         } else {
@@ -346,6 +395,7 @@ impl FATManager {
         let mut curr_cluster = start_cluster;
         let mut vec: Vec<u32> = Vec::new();
         loop {
+            println!("[fat::get_all_cluster_id] curr_cluster: {}", curr_cluster);
             vec.push(curr_cluster & END_OF_CLUSTER);
             let option = self.get_next_cluster(curr_cluster);
             if let Some(next_cluster) = option {

@@ -1,12 +1,11 @@
-use crate::{device::BlockDevice, BLOCK_CACHE_LIMIT};
+use super::device::BlockDevice;
+use super::{BLOCK_CACHE_LIMIT, BLOCK_SIZE};
 
 use alloc::sync::Arc;
 // use core::num::NonZeroUsize;
 use lazy_static::*;
 use lru::LruCache;
 use spin::{Mutex, RwLock};
-
-use crate::BLOCK_SIZE;
 
 pub trait Cache {
     /// The read-only mapper to the block cache
@@ -177,7 +176,7 @@ pub fn get_block_cache(
     block_device: Arc<dyn BlockDevice>,
 ) -> Option<Arc<RwLock<BlockCache>>> {
     // TODO
-    // 是否需要添加一个字段 物理起始块号 phy_blk_id = start_sec + block_id
+    // 是否需要添加一个字段 物理起始块号 phy_blk_id = start_sec + block_id (似乎实际上的块编号并非从 disk 的 0 地址开始的)
     BLOCK_CACHE_MANAGER
         // TODO 区分 BLOCK_CACHE_MANAGER 的读写锁
         .lock()
