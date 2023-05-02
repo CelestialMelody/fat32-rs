@@ -129,7 +129,7 @@ impl FileSystem {
 
         let fat = FATManager::new(bpb.fat1_offset(), Arc::clone(&device));
 
-        let root_dir_cluster = bpb.first_data_sector();
+        let root_dir_cluster = bpb.root_cluster();
         let mut name_bytes = [0x20u8; 11];
         name_bytes[0] = ROOT;
         let root_dir_entry = ShortDirEntry::new_from_name_bytes(
@@ -170,7 +170,7 @@ impl FileSystem {
         // let fat = FATManager::new(bpb.fat1_offset(), Arc::clone(&device));
 
         // FIX
-        let root_dir_cluster = bpb.first_data_sector();
+        let root_dir_cluster = bpb.root_cluster();
         let mut name_bytes = [0x20u8; 11];
         name_bytes[0] = ROOT;
         let root_dir_entry = ShortDirEntry::new_from_name_bytes(

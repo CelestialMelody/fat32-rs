@@ -40,7 +40,7 @@ pub fn root(fs: Arc<RwLock<FileSystem>>) -> VirFile {
     let device = Arc::clone(&fs.read().device);
 
     // fix
-    let root_dir_cluster = fs.read().bpb.first_data_sector();
+    let root_dir_cluster = fs.read().bpb.root_cluster();
 
     let cluster_chain = Arc::new(RwLock::new(ClusterChain::new(
         root_dir_cluster as u32,

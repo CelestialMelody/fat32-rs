@@ -371,6 +371,10 @@ impl BIOSParameterBlock {
         self.bpb32.fat_sz32 as usize
     }
 
+    pub fn root_cluster(&self) -> usize {
+        self.bpb32.root_clus as usize
+    }
+
     pub fn fat_info_sector(&self) -> usize {
         self.bpb32.fs_info as usize
     }
