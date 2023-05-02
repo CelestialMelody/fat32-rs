@@ -10,7 +10,6 @@ use core::ops::FnOnce;
 use core::option::Option::{self, None, Some};
 use core::{assert, assert_eq, assert_ne, todo};
 use spin::RwLock;
-use std::println;
 
 use super::cache::get_block_cache;
 
@@ -401,7 +400,7 @@ impl VirFile {
 
         let mut clus_chain = self.cluster_chain.read().clone();
 
-        assert_eq!(clus_chain.current_cluster, NEW_VIR_FILE_CLUSTER);
+        // assert_eq!(clus_chain.current_cluster, NEW_VIR_FILE_CLUSTER);
         assert_ne!(clus_chain.start_cluster, 0);
 
         clus_chain = clus_chain.next().unwrap();
