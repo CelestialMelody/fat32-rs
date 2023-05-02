@@ -114,7 +114,7 @@ fn fs_pack() -> std::io::Result<()> {
     };
 
     // 读取目录
-    let root_inode = Arc::new(root(efs.clone(), block_file.clone()));
+    let root_inode = Arc::new(root(efs.clone()));
     let mut folder_inode: Vec<Arc<VirFile>> = Vec::new();
     let mut curr_folder_inode = Arc::clone(&root_inode);
 
@@ -179,7 +179,7 @@ fn fs_pack() -> std::io::Result<()> {
                             }
                             folder_inode.push(Arc::clone(&curr_folder_inode));
                             drop(curr_folder_inode);
-                            curr_folder_inode = Arc::new(new_inode);
+                            curr_folder_inode = new_inode;
                         }
                     }
                 }
