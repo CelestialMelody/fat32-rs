@@ -130,6 +130,10 @@ impl FileSystem {
         let fat = FATManager::new(bpb.fat1_offset(), Arc::clone(&device));
 
         let root_dir_cluster = bpb.root_cluster();
+
+        // Set root next cluster
+        fat.set_next_cluster(root_dir_cluster as u32, END_OF_CLUSTER);
+
         let mut name_bytes = [0x20u8; 11];
         name_bytes[0] = ROOT;
         let root_dir_entry = ShortDirEntry::new_from_name_bytes(

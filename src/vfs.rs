@@ -47,16 +47,10 @@ pub fn root(fs: Arc<RwLock<FileSystem>>) -> VirFile {
         fs.read().bpb.fat1_offset(),
     )));
 
-    // Set root next cluster
-    fs.write()
-        .fat
-        .write()
-        .set_next_cluster(root_dir_cluster as u32, END_OF_CLUSTER);
-
     let root_dir = VirFile::new(
         String::from("/"),
         DirEntryPos {
-            start_cluster: ROOT_DIR_ENTRY_CLUSTER,
+            cluster: ROOT_DIR_ENTRY_CLUSTER,
             offset_in_cluster: 0,
         },
         Vec::new(),
@@ -76,11 +70,11 @@ pub fn root(fs: Arc<RwLock<FileSystem>>) -> VirFile {
     let mut curr_cluster = root_dir_cluster as u32;
     let mut clus_chain = root_dir.cluster_chain.read().clone().next().unwrap();
 
-    loop {
+    'outer: loop {
         let cluster_offset_in_disk = root_dir.fs.read().bpb.offset(curr_cluster);
         let start_block_id = cluster_offset_in_disk / BLOCK_SIZE;
         for block_id in start_block_id..start_block_id + spc {
-            while index >= left {
+            while index < left + BLOCK_SIZE {
                 let buf = entry.as_bytes_mut();
                 let offset_in_block = index - left;
                 let len = buf.len();
@@ -104,7 +98,7 @@ pub fn root(fs: Arc<RwLock<FileSystem>>) -> VirFile {
                 }
 
                 if entry.is_empty() {
-                    break;
+                    break 'outer;
                 }
 
                 index += len;
@@ -112,11 +106,6 @@ pub fn root(fs: Arc<RwLock<FileSystem>>) -> VirFile {
             }
             left += BLOCK_SIZE;
         }
-
-        if entry.is_empty() {
-            break;
-        }
-
         clus_chain = clus_chain.next().unwrap();
         curr_cluster = clus_chain.current_cluster;
     }
@@ -135,14 +124,14 @@ pub enum VirFileType {
 
 #[derive(Clone, Copy, Debug)]
 pub struct DirEntryPos {
-    pub(crate) start_cluster: u32,
+    pub(crate) cluster: u32,
     pub(crate) offset_in_cluster: usize,
 }
 
 impl DirEntryPos {
     fn new(start_cluster: u32, offset_in_cluster: usize) -> Self {
         Self {
-            start_cluster,
+            cluster: start_cluster,
             offset_in_cluster,
         }
     }
@@ -201,8 +190,8 @@ impl VirFile {
     }
 
     pub fn sde_pos(&self) -> (usize, usize) {
-        assert!(self.sde_pos.start_cluster != END_OF_CLUSTER);
-        let cluster_id = self.sde_pos.start_cluster;
+        assert!(self.sde_pos.cluster != END_OF_CLUSTER);
+        let cluster_id = self.sde_pos.cluster;
         let cluster_offset = self.fs.read().bpb.offset(cluster_id);
         let offset = self.sde_pos.offset_in_cluster + cluster_offset;
         let offset_in_block = offset % BLOCK_SIZE;
@@ -212,8 +201,8 @@ impl VirFile {
     }
 
     pub fn lde_pos(&self, index: usize) -> (usize, usize) {
-        assert!(self.lde_pos[index].start_cluster != END_OF_CLUSTER);
-        let cluster_id = self.lde_pos[index].start_cluster;
+        assert!(self.lde_pos[index].cluster != END_OF_CLUSTER);
+        let cluster_id = self.lde_pos[index].cluster;
         let cluster_offset = self.fs.read().bpb.offset(cluster_id);
         let offset = self.lde_pos[index].offset_in_cluster + cluster_offset;
         let offset_in_block = offset % BLOCK_SIZE;
@@ -224,7 +213,7 @@ impl VirFile {
 
     pub fn read_sde<V>(&self, f: impl FnOnce(&ShortDirEntry) -> V) -> V {
         // fix
-        if self.sde_pos.start_cluster == ROOT_DIR_ENTRY_CLUSTER {
+        if self.sde_pos.cluster == ROOT_DIR_ENTRY_CLUSTER {
             let root_dir_entry = self.fs.read().root_dir_entry();
             let root_dir_entry_read = root_dir_entry.read();
             return f(&root_dir_entry_read);
@@ -247,7 +236,7 @@ impl VirFile {
 
     pub fn modify_sde<V>(&self, f: impl FnOnce(&mut ShortDirEntry) -> V) -> V {
         // fix
-        if self.sde_pos.start_cluster == ROOT_DIR_ENTRY_CLUSTER {
+        if self.sde_pos.cluster == ROOT_DIR_ENTRY_CLUSTER {
             let root_dir_entry = self.fs.read().root_dir_entry();
             let mut root_dir_entry_write = root_dir_entry.write();
             return f(&mut root_dir_entry_write);
