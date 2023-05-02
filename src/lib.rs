@@ -15,12 +15,24 @@ use crate::fat::ClusterChainErr;
 use crate::file::FileError;
 
 use core::convert::TryInto;
+use core::iter::Iterator;
+use core::option::Option::{self, None, Some};
 use core::str;
 
 extern crate alloc;
 
 use alloc::string::String;
 use alloc::vec::Vec;
+
+pub use bpb::*;
+pub use cache::*;
+pub use device::*;
+pub use dir::*;
+pub use entry::*;
+pub use fat::*;
+pub use file::*;
+pub use fs::*;
+pub use vfs::*;
 
 // Signature
 pub const LEAD_SIGNATURE: u32 = 0x41615252;
@@ -40,10 +52,14 @@ pub const BAD_CLUSTER: u32 = 0x0FFFFFF7;
 //  在创建新簇时将其在 FAT 表中的值设置为 EOC
 //  这样在 next() 中也判断是否为 EOC
 pub const END_OF_CLUSTER: u32 = 0x0FFFFFFF;
-pub const STRAT_CLUSTER_IN_FAT: u32 = 2;
+
+// TODO FIX
+pub const STRAT_CLUSTER_IN_FAT: u32 = 3;
+
 pub const NEW_VIR_FILE_CLUSTER: u32 = 0;
 // TODO 持久化根目录的不得已行为, 实际上只要能够知道根目录大小就行
-pub const ROOT_DIR_ENTRY_CLUSTER: u32 = 3;
+// fix 不需要 请更改 open fs
+pub const ROOT_DIR_ENTRY_CLUSTER: u32 = 0;
 
 pub const ATTR_READ_ONLY: u8 = 0x01;
 pub const ATTR_HIDDEN: u8 = 0x02;
@@ -70,6 +86,7 @@ pub const ROOT: u8 = 0x2F;
 
 // For Test
 pub const BLOCK_NUM: u32 = 0x4000;
+pub const ROOT_DIR_CLUSTER: u32 = 2;
 
 /// BPB Bytes Per Sector
 pub const BLOCK_SIZE: usize = 512;
