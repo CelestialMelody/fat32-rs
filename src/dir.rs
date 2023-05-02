@@ -6,6 +6,12 @@ use alloc::sync::Arc;
 use alloc::vec::Vec;
 use spin::RwLock;
 
+use core::clone::Clone;
+use core::convert::From;
+use core::option::Option::{self, None, Some};
+use core::result::Result::{self, Err, Ok};
+use core::{assert, assert_eq};
+
 use super::{
     generate_checksum, generate_short_name, long_name_split, short_name_format, split_name_ext,
 };
@@ -15,7 +21,7 @@ use super::{
     NEW_VIR_FILE_CLUSTER, ORIGINAL,
 };
 
-#[derive(Debug, PartialEq, Clone, Copy, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DirError {
     NoMatchDir,
     NoMatchFile,
@@ -30,7 +36,7 @@ pub enum DirError {
 }
 
 pub trait Dir {
-    fn find(&self, path: Vec<&str>) -> Result<VirFile, DirError>;
+    fn find(&self, path: Vec<&str>) -> Result<Arc<VirFile>, DirError>;
 
     fn create(&self, name: &str, file_type: VirFileType) -> Result<VirFile, DirError>;
 
@@ -42,7 +48,7 @@ pub trait Dir {
 impl Dir for VirFile {
     /// 根据路径递归搜索文件
     // TODO 是否需要 Arc
-    fn find(&self, path: Vec<&str>) -> Result<VirFile, DirError> {
+    fn find(&self, path: Vec<&str>) -> Result<Arc<VirFile>, DirError> {
         let len = path.len();
         if len == 0 {
             return Err(DirError::MissingName);
@@ -58,7 +64,7 @@ impl Dir for VirFile {
                 return Err(DirError::NoMatch);
             }
         }
-        Ok(current)
+        Ok(Arc::new(current))
     }
 
     fn remove(&self, path: Vec<&str>) -> Result<(), DirError> {

@@ -3,6 +3,11 @@ use super::{BLOCK_CACHE_LIMIT, BLOCK_SIZE};
 
 use alloc::sync::Arc;
 // use core::num::NonZeroUsize;
+use core::clone::Clone;
+use core::marker::Sized;
+use core::ops::Drop;
+use core::ops::FnOnce;
+use core::option::Option::{self, None, Some};
 use lazy_static::*;
 use lru::LruCache;
 use spin::{Mutex, RwLock};

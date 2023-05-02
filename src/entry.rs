@@ -199,7 +199,9 @@ use super::{
 };
 
 use alloc::string::{String, ToString};
-use core::fmt::Debug;
+use core::default::Default;
+use core::iter::Iterator;
+use core::option::Option::{self, None, Some};
 use core::str;
 
 #[derive(PartialEq, Debug, Clone, Copy)]

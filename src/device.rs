@@ -1,6 +1,7 @@
 use crate::Error;
 
 use core::any::Any;
+use core::marker::{Send, Sync};
 use core::result::Result;
 
 pub trait BlockDevice: Send + Sync + Any {

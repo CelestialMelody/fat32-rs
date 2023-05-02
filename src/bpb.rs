@@ -218,6 +218,16 @@ impl BIOSParameterBlock {
     /// The first data sector beyond the root directory
     ///
     /// The start of the data region, the first sector of cluster 2, is computed as follows:
+    ///
+    // For FAT32, the root directory can be of variable size and is a cluster chain, just like any other
+    // directory is. The first cluster of the root directory on a FAT32 volume is stored in BPB_RootClus.
+    // Unlike other directories, the root directory itself on any FAT type does not have any date or time
+    // stamps, does not have a file name (other than the implied file name “\”), and does not contain “.” and
+    // ".." files as the first two directory entries in the directory. The only other special aspect of the root
+    // directory is that it is the only directory on the FAT volume for which it is valid to have a file that has
+    // only the ATTR_VOLUME_ID attribute bit set.
+    //
+    //  根目录在此处
     pub fn first_data_sector(&self) -> usize {
         // let mut fat_sz: usize = 0;
         // if self.bpb.fat_sz16 != 0 {

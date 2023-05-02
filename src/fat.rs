@@ -14,7 +14,12 @@ use super::{BLOCK_SIZE, END_OF_CLUSTER, NEW_VIR_FILE_CLUSTER};
 use alloc::collections::VecDeque;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
+use core::assert;
+use core::clone::Clone;
 use core::fmt::Debug;
+use core::iter::Iterator;
+use core::option::Option::{self, None, Some};
+use core::result::Result::{self, Err, Ok};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ClusterChainErr {

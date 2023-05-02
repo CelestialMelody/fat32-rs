@@ -8,6 +8,10 @@ use super::get_needed_sector;
 
 use alloc::sync::Arc;
 use alloc::vec::Vec;
+use core::clone::Clone;
+use core::cmp::Ord;
+use core::option::Option::{self, None, Some};
+use core::result::Result::{self, Err, Ok};
 
 pub trait File {
     fn read(&self, buf: &mut [u8]) -> Result<usize, FileError>;
