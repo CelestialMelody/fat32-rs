@@ -1,4 +1,4 @@
-// #![no_std]
+#![no_std]
 pub mod bpb;
 pub mod cache;
 pub mod device;
@@ -41,24 +41,36 @@ pub const TRAIL_SIGNATURE: u32 = 0xAA550000;
 
 // Cluster
 pub const FREE_CLUSTER: u32 = 0x00000000;
-pub const END_CLUSTER: u32 = 0x0FFFFFF8;
-pub const BAD_CLUSTER: u32 = 0x0FFFFFF7;
+pub const BAD_CLUSTER: u32 = 0x0FFF_FFF7;
 /// EOC: End of Cluster Chain
 /// note that we still USE this cluster and this clsuter id is not EOC,
 /// but in FAT table, the value of this cluster is EOC
 ///
 /// A FAT32 FAT entry is actually only a 28-bit entry. The high 4 bits of a FAT32 FAT entry are reserved.
+///
+/// Microsoft operating system FAT drivers use the EOC value 0x0FFF for FAT12, 0xFFFF for FAT16,
+/// and 0x0FFFFFFF for FAT32 when they set the contents of a cluster to the EOC mark.
+///
+// IsEOF = FALSE;
+// If(FATType == FAT12) {
+//     If(FATContent >= 0x0FF8)
+//     IsEOF = TRUE;
+//    } else if(FATType == FAT16) {
+//     If(FATContent >= 0xFFF8)
+//     IsEOF = TRUE;
+//    } else if (FATType == FAT32) {
+//     If(FATContent >= 0x0FFFFFF8)
+//     IsEOF = TRUE;
+//    }
 //
 //  在创建新簇时将其在 FAT 表中的值设置为 EOC
 //  这样在 next() 中也判断是否为 EOC
-pub const END_OF_CLUSTER: u32 = 0x0FFFFFFF;
-
-// TODO FIX
-pub const STRAT_CLUSTER_IN_FAT: u32 = 3;
+// pub const END_OF_CLUSTER: u32 = 0x0FFFFFFF; linux mkfs fat32 再 mount 后发现 EOC 的值为 0x0FFFFFF8
+pub const END_OF_CLUSTER: u32 = 0x0FFF_FFF8;
+pub const CLUSTER_MASK: u32 = 0x0FFF_FFFF;
 
 pub const NEW_VIR_FILE_CLUSTER: u32 = 0;
-// TODO 持久化根目录的不得已行为, 实际上只要能够知道根目录大小就行
-// fix 不需要 请更改 open fs
+// 标记为根目录项的簇号(跟目录项实际不保存在磁盘上)
 pub const ROOT_DIR_ENTRY_CLUSTER: u32 = 0;
 
 pub const ATTR_READ_ONLY: u8 = 0x01;

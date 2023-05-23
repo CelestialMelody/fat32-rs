@@ -9,7 +9,7 @@ use super::read_le_u32;
 
 use super::cache::Cache;
 use super::device::BlockDevice;
-use super::{BLOCK_SIZE, END_OF_CLUSTER, NEW_VIR_FILE_CLUSTER};
+use super::{BLOCK_SIZE, CLUSTER_MASK, END_OF_CLUSTER, NEW_VIR_FILE_CLUSTER};
 
 use alloc::collections::VecDeque;
 use alloc::sync::Arc;
@@ -155,7 +155,7 @@ impl Iterator for ClusterChain {
         }
 
         let next_cluster = read_le_u32(&buffer[offset_left..offset_left + 4]);
-        let next_cluster = if next_cluster == END_OF_CLUSTER {
+        let next_cluster = if next_cluster >= END_OF_CLUSTER {
             None
         } else {
             Some(next_cluster)
@@ -274,12 +274,12 @@ impl FATManager {
             }
         }
 
-        cluster & END_OF_CLUSTER
+        cluster & CLUSTER_MASK
     }
 
     pub fn blank_cluster(&mut self, start_from: u32) -> u32 {
         if let Some(cluster) = self.recycled_cluster.pop_front() {
-            cluster & END_OF_CLUSTER
+            cluster & CLUSTER_MASK
         } else {
             self.find_blank_cluster(start_from)
         }
@@ -310,7 +310,7 @@ impl FATManager {
             next_cluster = read_le_u32(&buffer[offset_in_block..offset_in_block + 4]);
         }
         assert!(next_cluster >= 2);
-        if next_cluster == END_OF_CLUSTER {
+        if next_cluster >= END_OF_CLUSTER {
             None
         } else {
             Some(next_cluster)
@@ -351,7 +351,7 @@ impl FATManager {
                 return None;
             }
         }
-        Some(cluster & END_OF_CLUSTER)
+        Some(cluster & CLUSTER_MASK)
     }
 
     // Get the last cluster of a cluster chain
@@ -364,7 +364,7 @@ impl FATManager {
             if let Some(cluster) = option {
                 curr_cluster = cluster
             } else {
-                return curr_cluster & END_OF_CLUSTER;
+                return curr_cluster & CLUSTER_MASK;
             }
         }
     }
@@ -374,7 +374,7 @@ impl FATManager {
         let mut curr_cluster = start_cluster;
         let mut vec: Vec<u32> = Vec::new();
         loop {
-            vec.push(curr_cluster & END_OF_CLUSTER);
+            vec.push(curr_cluster & CLUSTER_MASK);
             let option = self.get_next_cluster(curr_cluster);
             if let Some(next_cluster) = option {
                 curr_cluster = next_cluster;

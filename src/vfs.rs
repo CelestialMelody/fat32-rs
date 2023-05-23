@@ -20,7 +20,7 @@ use super::fat::ClusterChain;
 use super::fs::FileSystem;
 use super::{
     ATTR_ARCHIVE, ATTR_DIRECTORY, ATTR_LONG_NAME, BLOCK_SIZE, DIRENT_SIZE, END_OF_CLUSTER,
-    NEW_VIR_FILE_CLUSTER, ROOT_DIR_ENTRY_CLUSTER, STRAT_CLUSTER_IN_FAT,
+    NEW_VIR_FILE_CLUSTER, ROOT_DIR_ENTRY_CLUSTER,
 };
 
 #[derive(Clone)]
@@ -61,56 +61,65 @@ pub fn root(fs: Arc<RwLock<FileSystem>>) -> VirFile {
     );
 
     // init file_size
-    let spc = root_dir.fs.read().bpb.sectors_per_cluster();
-    let mut entry = LongDirEntry::empty();
-    let mut index = 0usize;
-    let mut file_size = 0usize;
-    let mut left = 0usize;
+    // let spc = root_dir.fs.read().bpb.sectors_per_cluster();
+    // let mut entry = LongDirEntry::empty();
+    // let mut index = 0usize;
+    // let mut file_size = 0usize;
+    // let mut left = 0usize;
 
-    let mut curr_cluster = root_dir_cluster as u32;
-    let mut clus_chain = root_dir.cluster_chain.read().clone().next().unwrap();
+    // let mut curr_cluster = root_dir_cluster as u32;
+    // let mut clus_chain = root_dir.cluster_chain.read().clone().next().unwrap();
 
-    'outer: loop {
-        let cluster_offset_in_disk = root_dir.fs.read().bpb.offset(curr_cluster);
-        let start_block_id = cluster_offset_in_disk / BLOCK_SIZE;
-        for block_id in start_block_id..start_block_id + spc {
-            while index < left + BLOCK_SIZE {
-                let buf = entry.as_bytes_mut();
-                let offset_in_block = index - left;
-                let len = buf.len();
+    // 'outer: loop {
+    //     let cluster_offset_in_disk = root_dir.fs.read().bpb.offset(curr_cluster);
+    //     let start_block_id = cluster_offset_in_disk / BLOCK_SIZE;
+    //     for block_id in start_block_id..start_block_id + spc {
+    //         // while index >= left {
+    //         while index < left + BLOCK_SIZE {
+    //             let buf = entry.as_bytes_mut();
+    //             let offset_in_block = index - left;
+    //             let len = buf.len();
 
-                let option = get_block_cache(block_id, Arc::clone(&root_dir.device));
-                if let Some(block) = option {
-                    block.read().read(0, |cache: &[u8; BLOCK_SIZE]| {
-                        let dst = &mut buf[..len];
-                        let src = &cache[offset_in_block..offset_in_block + len];
-                        dst.copy_from_slice(src);
-                    });
-                } else {
-                    let mut cache = [0u8; BLOCK_SIZE];
-                    root_dir
-                        .device
-                        .read_blocks(&mut cache, block_id * BLOCK_SIZE, 1)
-                        .unwrap();
-                    let dst = &mut buf[..len];
-                    let src = &cache[offset_in_block..offset_in_block + len];
-                    dst.copy_from_slice(src);
-                }
+    //             let option = get_block_cache(block_id, Arc::clone(&root_dir.device));
+    //             if let Some(block) = option {
+    //                 block.read().read(0, |cache: &[u8; BLOCK_SIZE]| {
+    //                     let dst = &mut buf[..len];
+    //                     let src = &cache[offset_in_block..offset_in_block + len];
+    //                     dst.copy_from_slice(src);
+    //                 });
+    //             } else {
+    //                 let mut cache = [0u8; BLOCK_SIZE];
+    //                 root_dir
+    //                     .device
+    //                     .read_blocks(&mut cache, block_id * BLOCK_SIZE, 1)
+    //                     .unwrap();
+    //                 let dst = &mut buf[..len];
+    //                 let src = &cache[offset_in_block..offset_in_block + len];
+    //                 dst.copy_from_slice(src);
+    //             }
 
-                if entry.is_empty() {
-                    break 'outer;
-                }
+    //             if entry.is_empty() {
+    //                 break 'outer;
+    //             }
 
-                index += len;
-                file_size += len;
-            }
-            left += BLOCK_SIZE;
-        }
-        clus_chain = clus_chain.next().unwrap();
-        curr_cluster = clus_chain.current_cluster;
-    }
+    //             index += len;
+    //             file_size += len;
+    //         }
+    //         // if entry.is_empty() {
+    //         //     break;
+    //         // }
+    //         left += BLOCK_SIZE;
+    //     }
 
-    root_dir.set_file_size(file_size);
+    //     // if entry.is_empty() {
+    //     //     break;
+    //     // }
+
+    //     clus_chain = clus_chain.next().unwrap();
+    //     curr_cluster = clus_chain.current_cluster;
+    // }
+
+    // root_dir.set_file_size(file_size);
 
     root_dir
 }
@@ -167,6 +176,12 @@ impl VirFile {
         let option = get_block_cache(block_id, Arc::clone(&self.device));
         if let Some(block) = option {
             block.read().read(offset_in_block, |sde: &ShortDirEntry| {
+                // assert!(
+                //     sde.first_cluster() >= 2, // 对于文件, 在写之前并未分配簇, 此时簇号为 NEW_VIR_FILE_CLUSTER; 分配簇时会进行对 cluster_chain 的 refresh
+                //     "name: {}, first_cluster = {}",
+                //     sde.name(),
+                //     sde.first_cluster()
+                // );
                 start_cluster = sde.first_cluster();
             })
         } else {
@@ -178,7 +193,7 @@ impl VirFile {
             let src = &buf[offset_in_block..offset_in_block + DIRENT_SIZE];
             let dst = sde.as_bytes_mut();
             dst.copy_from_slice(src);
-            assert_ne!(sde.first_cluster(), 0);
+
             start_cluster = sde.first_cluster();
         }
 
@@ -190,7 +205,7 @@ impl VirFile {
     }
 
     pub fn sde_pos(&self) -> (usize, usize) {
-        assert!(self.sde_pos.cluster != END_OF_CLUSTER);
+        assert!(self.sde_pos.cluster < END_OF_CLUSTER);
         let cluster_id = self.sde_pos.cluster;
         let cluster_offset = self.fs.read().bpb.offset(cluster_id);
         let offset = self.sde_pos.offset_in_cluster + cluster_offset;
@@ -201,7 +216,7 @@ impl VirFile {
     }
 
     pub fn lde_pos(&self, index: usize) -> (usize, usize) {
-        assert!(self.lde_pos[index].cluster != END_OF_CLUSTER);
+        assert!(self.lde_pos[index].cluster < END_OF_CLUSTER);
         let cluster_id = self.lde_pos[index].cluster;
         let cluster_offset = self.fs.read().bpb.offset(cluster_id);
         let offset = self.lde_pos[index].offset_in_cluster + cluster_offset;
@@ -310,9 +325,10 @@ impl VirFile {
     }
 
     pub fn offset_block_pos(&self, offset: usize) -> Option<(usize, usize)> {
-        if offset > self.file_size() {
-            return None;
-        }
+        // FIX 目录文件大小为0
+        // if offset > self.file_size() {
+        //     return None;
+        // }
 
         let cluster_size = self.fs.read().cluster_size();
         let cluster_index = offset / cluster_size;
@@ -336,9 +352,10 @@ impl VirFile {
     }
 
     pub fn dir_entry_pos(&self, offset: usize) -> Option<DirEntryPos> {
-        if offset > self.file_size() {
-            return None;
-        }
+        // FIX 目录文件大小为0
+        // if offset > self.file_size() {
+        //     return None;
+        // }
         let cluster_size = self.fs.read().cluster_size();
         let cluster_index = offset / cluster_size;
         let offset_in_cluster = offset % cluster_size;
@@ -373,39 +390,64 @@ impl VirFile {
 
         let mut index = offset;
 
-        // fix
-        let file_size = self.file_size();
+        // FIX 目录文件大小为0
+        // let file_size = self.file_size();
 
-        let end = (offset + buf.len()).min(file_size);
-        // let end = offset + buf.len();
+        // let end = (offset + buf.len()).min(file_size);
+        let end = offset + buf.len();
 
-        // > not >=
-        if offset > file_size || buf.len() == 0 {
-            // if buf.len() == 0 {
+        // fix: fat32 requires the directory size is 0
+        // if offset > file_size || buf.len() == 0 {
+        if buf.len() == 0 {
             return 0;
         }
+
         let pre_cluster_cnt = offset / cluster_size;
         let mut curr_cluster = self.first_cluster() as u32;
 
-        let mut clus_chain = self.cluster_chain.read().clone();
+        let mut clus_chain = self.cluster_chain.read().clone().next().unwrap();
 
         // assert_eq!(clus_chain.current_cluster, NEW_VIR_FILE_CLUSTER);
-        assert_ne!(clus_chain.start_cluster, 0);
-
-        clus_chain = clus_chain.next().unwrap();
+        assert_ne!(clus_chain.start_cluster, NEW_VIR_FILE_CLUSTER);
 
         for _ in 0..pre_cluster_cnt {
-            curr_cluster = self
-                .fs
-                .read()
-                .fat
-                .read()
-                .get_next_cluster(curr_cluster)
-                .unwrap();
+            // curr_cluster = self
+            //     .fs
+            //     .read()
+            //     .fat
+            //     .read()
+            //     .get_next_cluster(curr_cluster)
+            //     .unwrap();
 
-            clus_chain = clus_chain.next().unwrap();
-            assert_eq!(curr_cluster, clus_chain.current_cluster);
+            // clus_chain = clus_chain.next().unwrap();
+            // assert_eq!(curr_cluster, clus_chain.current_cluster);
             // curr_cluster = clus_chain.current_cluster;
+
+            // debug
+            if let Some(clus_chain) = clus_chain.next() {
+                curr_cluster = clus_chain.current_cluster;
+            } else {
+                //     let clus_chain = self.cluster_chain.read().clone().next().unwrap();
+                //     panic!(
+                //     "[read_at] cluster chain error, file.name: {}, pre_cluster_cnt: {}, cluster_id:{}, offset: {}",
+                //         self.name(),
+                //         pre_cluster_cnt,
+                //         clus_chain.current_cluster,
+                //         // clus_chain.next_cluster.unwrap()
+                //         offset
+                //     );
+
+                // 说明 offset 在最后一个簇的最后的位置
+                let first_cluster = self.first_cluster();
+                let clus_len = self
+                    .fs
+                    .read()
+                    .fat
+                    .read()
+                    .cluster_chain_len(first_cluster as u32);
+                assert!(offset == clus_len as usize * cluster_size);
+                return 0;
+            }
         }
 
         let mut left = pre_cluster_cnt * cluster_size;
@@ -413,6 +455,14 @@ impl VirFile {
         let mut already_read = 0;
 
         while index < end {
+            // crate::info!(
+            //     "[read_at] self.name: {}, self.first_cluster: 0x{:x}, offset: 0x{:x}, buf.len: {}, curr_cluster: 0x{:x}",
+            //     self.name,
+            //     self.first_cluster(),
+            //     offset,
+            //     buf.len(),
+            //     curr_cluster
+            // );
             let cluster_offset_in_disk = self.fs.read().bpb.offset(curr_cluster);
 
             let start_block_id = cluster_offset_in_disk / BLOCK_SIZE;
@@ -455,17 +505,17 @@ impl VirFile {
                 break;
             }
 
-            curr_cluster = self
-                .fs
-                .read()
-                .fat
-                .read()
-                .get_cluster_at(curr_cluster, 1)
-                .unwrap();
+            // curr_cluster = self
+            //     .fs
+            //     .read()
+            //     .fat
+            //     .read()
+            //     .get_cluster_at(curr_cluster, 1)
+            //     .unwrap();
 
-            // clus_chain = clus_chain.next().unwrap();
-            // // assert_eq!(curr_cluster, clus_chain.current_cluster);
-            // curr_cluster = clus_chain.current_cluster;
+            clus_chain = clus_chain.next().unwrap();
+            // assert_eq!(curr_cluster, clus_chain.current_cluster);
+            curr_cluster = clus_chain.current_cluster;
         }
 
         already_read
@@ -494,17 +544,17 @@ impl VirFile {
 
         let mut curr_cluster = self.first_cluster() as u32;
         for _ in 0..pre_cluster_cnt {
-            curr_cluster = self
-                .fs
-                .read()
-                .fat
-                .read()
-                .get_next_cluster(curr_cluster)
-                .unwrap();
+            // curr_cluster = self
+            //     .fs
+            //     .read()
+            //     .fat
+            //     .read()
+            //     .get_next_cluster(curr_cluster)
+            //     .unwrap();
 
             clus_chain = clus_chain.next().unwrap();
-            assert_eq!(curr_cluster, clus_chain.current_cluster);
-            // curr_cluster = clus_chain.current_cluster;
+            // assert_eq!(curr_cluster, clus_chain.current_cluster);
+            curr_cluster = clus_chain.current_cluster;
         }
 
         let mut left = pre_cluster_cnt * cluster_size;
@@ -570,6 +620,7 @@ impl VirFile {
         already_write
     }
 
+    // TODO fat32 规定目录文件的大小为 0
     fn incerase_size(&self, new_size: usize) {
         let first_cluster = self.first_cluster() as u32;
         let old_size = self.file_size();
@@ -583,9 +634,12 @@ impl VirFile {
             .count_needed_clusters(new_size, first_cluster);
 
         if need_cluster_cnt == 0 {
-            self.modify_sde(|sde| {
-                sde.set_file_size(new_size as u32);
-            });
+            // FIX fat32 规定目录文件的大小为 0
+            if !self.is_dir() {
+                self.modify_sde(|sde| {
+                    sde.set_file_size(new_size as u32);
+                });
+            }
             return;
         }
 
@@ -595,7 +649,7 @@ impl VirFile {
             .alloc_cluster(need_cluster_cnt, first_cluster);
 
         if let Some(start_cluster) = option {
-            if first_cluster == NEW_VIR_FILE_CLUSTER || first_cluster == ROOT_DIR_ENTRY_CLUSTER {
+            if first_cluster == NEW_VIR_FILE_CLUSTER {
                 self.cluster_chain.write().refresh(start_cluster);
 
                 self.modify_sde(|sde| {
@@ -611,9 +665,11 @@ impl VirFile {
                     .set_next_cluster(last_cluster, start_cluster);
             }
 
-            self.modify_sde(|sde| {
-                sde.set_file_size(new_size as u32);
-            });
+            if !self.is_dir() {
+                self.modify_sde(|sde| {
+                    sde.set_file_size(new_size as u32);
+                });
+            }
         } else {
             panic!("Alloc Cluster Failed! Out of Space!");
         }
@@ -625,6 +681,7 @@ impl VirFile {
         let old_size = self.file_size();
         let cluster_size = self.fs.read().cluster_size();
 
+        // 对于 目录文件 old_size = 0
         if new_size >= old_size {
             self.incerase_size(new_size);
         } else {
@@ -644,6 +701,9 @@ impl VirFile {
             }
 
             self.fs.write().dealloc_cluster(release_clsuter_vec);
+
+            // fat32 目录文件大小为 0
+            assert!(!self.is_dir());
             self.modify_sde(|sde| {
                 sde.set_file_size(new_size as u32);
             });

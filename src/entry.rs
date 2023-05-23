@@ -432,7 +432,7 @@ impl ShortDirEntry {
 
     pub fn gen_check_sum(&self) -> u8 {
         let mut name_: [u8; 11] = [0u8; 11];
-        let mut sum: u8 = 0;
+        let mut sum: u32 = 0;
         for i in 0..8 {
             name_[i] = self.name[i];
         }
@@ -441,9 +441,9 @@ impl ShortDirEntry {
         }
 
         for i in 0..11 {
-            sum = ((sum & 1) << 7) + (sum >> 1) + name_[i];
+            sum = (((sum & 1) << 7) + (sum >> 1) + name_[i] as u32) & 0xFF;
         }
-        sum
+        sum as u8
     }
 
     pub fn name(&self) -> String {

@@ -10,6 +10,7 @@ use core::ops::FnOnce;
 use core::option::Option::{self, None, Some};
 use lazy_static::*;
 use lru::LruCache;
+// use alloc::collections::VecDeque;
 use spin::{Mutex, RwLock};
 
 pub trait Cache {
@@ -113,6 +114,7 @@ pub struct BlockCacheManager {
     // TODO
     // 是否需要添加一个字段 物理起始块号
     lru: LruCache<usize, Arc<RwLock<BlockCache>>>,
+    // queue: VecDeque<(usize, Arc<RwLock<BlockCache>>)>,
 }
 
 impl BlockCacheManager {
@@ -122,6 +124,8 @@ impl BlockCacheManager {
             //
             // 创建一个不会自动清理的lru_cache
             lru: LruCache::unbounded(),
+
+            // queue: VecDeque::new(),
         }
     }
 
@@ -159,6 +163,39 @@ impl BlockCacheManager {
         }
     }
 
+    // pub fn get_block_cache(
+    //     &mut self,
+    //     block_id: usize,
+    //     block_device: Arc<dyn BlockDevice>,
+    // ) -> Option<Arc<RwLock<BlockCache>>> {
+    //     if let Some(pair) = self.queue.iter().find(|pair| pair.0 == block_id) {
+    //         Some(Arc::clone(&pair.1))
+    //     } else {
+    //         // substitute
+    //         if self.queue.len() == BLOCK_CACHE_LIMIT {
+    //             // from front to tail
+    //             if let Some((idx, _)) = self
+    //                 .queue
+    //                 .iter()
+    //                 .enumerate()
+    //                 .find(|(_, pair)| Arc::strong_count(&pair.1) == 1)
+    //             {
+    //                 self.queue.drain(idx..=idx);
+    //             } else {
+    //                 // panic!("Run out of BlockCache!");
+    //                 return None;
+    //             }
+    //         }
+    //         // load block into mem and push back
+    //         let block_cache = Arc::new(RwLock::new(BlockCache::new(
+    //             block_id,
+    //             Arc::clone(&block_device),
+    //         )));
+    //         self.queue.push_back((block_id, Arc::clone(&block_cache)));
+    //         Some(block_cache)
+    //     }
+    // }
+
     pub fn clear(&mut self) {
         for (_, block_cache) in self.lru.iter() {
             block_cache.write().sync();
@@ -166,6 +203,10 @@ impl BlockCacheManager {
         // TODO
         // 是否需要考虑引用计数
         // self.lru.clear();
+
+        // for (_, block_cache) in self.queue.iter() {
+        //     block_cache.write().sync();
+        // }
     }
 }
 
@@ -190,4 +231,9 @@ pub fn get_block_cache(
 
 pub fn sync_all() {
     BLOCK_CACHE_MANAGER.lock().clear();
+
+    // let manager = BLOCK_CACHE_MANAGER.lock();
+    // for (_, cache) in manager.queue.iter() {
+    //     cache.write().sync();
+    // }
 }

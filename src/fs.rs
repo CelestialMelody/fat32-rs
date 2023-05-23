@@ -19,15 +19,16 @@ use super::vfs::VirFileType;
 
 use super::{
     BLOCK_NUM, BLOCK_SIZE, END_OF_CLUSTER, FREE_CLUSTER, NEW_VIR_FILE_CLUSTER, ROOT,
-    ROOT_DIR_ENTRY_CLUSTER, STRAT_CLUSTER_IN_FAT,
+    ROOT_DIR_ENTRY_CLUSTER,
 };
 
 pub struct FileSystem {
     pub(crate) device: Arc<dyn BlockDevice>,
     pub(crate) free_cluster_cnt: Arc<RwLock<usize>>, // TODO Arc needed?
-    pub(crate) bpb: BIOSParameterBlock,              // read only
+    // pub(crate) bpb: BIOSParameterBlock,              // read only
+    pub bpb: BIOSParameterBlock, // read only
     pub(crate) fat: Arc<RwLock<FATManager>>,
-    pub(crate) root_dir_entry: Arc<RwLock<ShortDirEntry>>, // 根目录无目录项，引入以与其他文件一致
+    pub(crate) root_dir_entry: Arc<RwLock<ShortDirEntry>>, // 虚拟根目录项。根目录无目录项，引入以与其他文件一致
 }
 
 impl FileSystem {
@@ -73,6 +74,7 @@ impl FileSystem {
         self.first_data_sector()
     }
 
+    #[allow(unused)]
     pub fn create(device: Arc<dyn BlockDevice>) -> Arc<RwLock<Self>> {
         let basic_bpb = BasicBPB {
             bs_jmp_boot: [0xEB, 0x58, 0x90],
@@ -130,10 +132,8 @@ impl FileSystem {
         let fat = FATManager::new(bpb.fat1_offset(), Arc::clone(&device));
 
         let root_dir_cluster = bpb.root_cluster();
-
         // Set root next cluster
         fat.set_next_cluster(root_dir_cluster as u32, END_OF_CLUSTER);
-
         let mut name_bytes = [0x20u8; 11];
         name_bytes[0] = ROOT;
         let root_dir_entry = ShortDirEntry::new_from_name_bytes(
@@ -260,7 +260,8 @@ impl FileSystem {
     pub fn count_needed_clusters(&self, new_size: usize, start_cluster: u32) -> usize {
         let cluster_size = self.cluster_size();
         // For new vir file
-        if start_cluster == NEW_VIR_FILE_CLUSTER || start_cluster == ROOT_DIR_ENTRY_CLUSTER {
+        // TODO
+        if start_cluster == NEW_VIR_FILE_CLUSTER {
             return (new_size + cluster_size - 1) / cluster_size;
         }
 

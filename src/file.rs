@@ -45,7 +45,7 @@ impl File for VirFile {
             return Err(FileError::BufTooSmall);
         }
 
-        let clus_chain = self.cluster_chain.read().clone();
+        let clus_chain: crate::ClusterChain = self.cluster_chain.read().clone();
 
         assert_eq!(clus_chain.current_cluster, NEW_VIR_FILE_CLUSTER);
 
