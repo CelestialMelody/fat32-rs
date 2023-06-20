@@ -1,32 +1,27 @@
-use alloc::sync::Arc;
-use alloc::vec::Vec;
-use core::assert;
-use core::clone::Clone;
-use core::option::Option::{self, None, Some};
+use alloc::{sync::Arc, vec::Vec};
+use core::{
+    assert,
+    clone::Clone,
+    option::Option,
+    option::Option::{None, Some},
+};
 use spin::RwLock;
 
-use crate::ROOT_DIR_CLUSTER;
-
-use super::cache::get_block_cache;
-use super::vfs::root;
-
-use super::bpb::{BIOSParameterBlock, BasicBPB, FSInfo, BPB32};
-use super::cache::Cache;
-use super::device::BlockDevice;
-use super::entry::ShortDirEntry;
-use super::fat::FATManager;
-use super::vfs::VirFileType;
-
 use super::{
+    bpb::{BIOSParameterBlock, BasicBPB, FSInfo, BPB32},
+    cache::{get_block_cache, Cache},
+    device::BlockDevice,
+    entry::ShortDirEntry,
+    fat::FATManager,
+    vfs::VirtFileType,
     BLOCK_NUM, BLOCK_SIZE, END_OF_CLUSTER, FREE_CLUSTER, NEW_VIR_FILE_CLUSTER, ROOT,
-    ROOT_DIR_ENTRY_CLUSTER,
+    ROOT_DIR_CLUSTER,
 };
 
 pub struct FileSystem {
     pub(crate) device: Arc<dyn BlockDevice>,
-    pub(crate) free_cluster_cnt: Arc<RwLock<usize>>, // TODO Arc needed?
-    // pub(crate) bpb: BIOSParameterBlock,              // read only
-    pub bpb: BIOSParameterBlock, // read only
+    pub(crate) free_cluster_cnt: Arc<RwLock<usize>>,
+    pub(crate) bpb: BIOSParameterBlock, // read only
     pub(crate) fat: Arc<RwLock<FATManager>>,
     pub(crate) root_dir_entry: Arc<RwLock<ShortDirEntry>>, // 虚拟根目录项。根目录无目录项，引入以与其他文件一致
 }
@@ -53,12 +48,11 @@ impl FileSystem {
     }
 
     pub fn set_free_clusters(&self, cnt: usize) {
-        let option = get_block_cache(self.bpb.fat_info_sector(), Arc::clone(&self.device));
-        if let Some(block) = option {
-            block.write().modify(0, |fsinfo: &mut FSInfo| {
+        get_block_cache(self.bpb.fat_info_sector(), Arc::clone(&self.device))
+            .write()
+            .modify(0, |fsinfo: &mut FSInfo| {
                 fsinfo.set_free_clusters(cnt as u32)
             });
-        }
         *self.free_cluster_cnt.write() = cnt;
     }
 
@@ -96,7 +90,6 @@ impl FileSystem {
             fat_sz32: 64,
             ext_flags: 0,
             fs_ver: 0,
-            // fix
             root_clus: ROOT_DIR_CLUSTER,
             fs_info: 1,
             bk_boot_sec: 6,
@@ -110,7 +103,6 @@ impl FileSystem {
         };
         let bpb = BIOSParameterBlock { basic_bpb, bpb32 };
         get_block_cache(0, Arc::clone(&device))
-            .unwrap()
             .write()
             .modify(0, |b: &mut BIOSParameterBlock| *b = bpb);
 
@@ -125,7 +117,6 @@ impl FileSystem {
         };
         let free_cluster_cnt = fsinfo.free_cluster_cnt() as usize;
         get_block_cache(1, Arc::clone(&device))
-            .unwrap()
             .write()
             .modify(0, |f: &mut FSInfo| *f = fsinfo);
 
@@ -139,7 +130,7 @@ impl FileSystem {
         let root_dir_entry = ShortDirEntry::new_from_name_bytes(
             root_dir_cluster as u32,
             &name_bytes,
-            VirFileType::Dir,
+            VirtFileType::Dir,
         );
 
         let fs = Arc::new(RwLock::new(Self {
@@ -155,12 +146,10 @@ impl FileSystem {
 
     pub fn open(device: Arc<dyn BlockDevice>) -> Arc<RwLock<Self>> {
         let bpb = get_block_cache(0, Arc::clone(&device))
-            .unwrap()
             .read()
             .read(0, |bpb: &BIOSParameterBlock| *bpb);
 
         let free_cluster_cnt = get_block_cache(bpb.fat_info_sector(), Arc::clone(&device))
-            .unwrap()
             .read()
             .read(0, |fsinfo: &FSInfo| {
                 assert!(
@@ -173,14 +162,13 @@ impl FileSystem {
         let fat = FATManager::open(bpb.fat1_offset(), Arc::clone(&device));
         // let fat = FATManager::new(bpb.fat1_offset(), Arc::clone(&device));
 
-        // FIX
         let root_dir_cluster = bpb.root_cluster();
         let mut name_bytes = [0x20u8; 11];
         name_bytes[0] = ROOT;
         let root_dir_entry = ShortDirEntry::new_from_name_bytes(
             root_dir_cluster as u32,
             &name_bytes,
-            VirFileType::Dir,
+            VirtFileType::Dir,
         );
 
         Arc::new(RwLock::new(Self {
@@ -195,17 +183,11 @@ impl FileSystem {
     fn clear_cluster(&self, cluster: u32) {
         let block_id = self.first_sector_of_cluster(cluster);
         for i in 0..self.sector_pre_cluster() {
-            let option = get_block_cache(block_id + i, Arc::clone(&self.device));
-            if let Some(block) = option {
-                block.write().modify(0, |cache: &mut [u8; BLOCK_SIZE]| {
+            get_block_cache(block_id + i, Arc::clone(&self.device))
+                .write()
+                .modify(0, |cache: &mut [u8; BLOCK_SIZE]| {
                     cache.copy_from_slice(&[0u8; BLOCK_SIZE])
                 })
-            } else {
-                // TODO
-                self.device
-                    .write_blocks(&[0u8; BLOCK_SIZE], (block_id + i) * BLOCK_SIZE, 1)
-                    .unwrap();
-            }
         }
     }
 
@@ -233,7 +215,6 @@ impl FileSystem {
             curr_cluster_id = cluster_id;
         }
 
-        // TODO 是否维护 fsinfo next_free_cluster
         // self.clear_cluster(curr_cluster_id);
         self.fat
             .write()
@@ -274,12 +255,11 @@ impl FileSystem {
         }
     }
 
-    pub fn fat_read(&self, block_id: usize) -> [u8; BLOCK_SIZE] {
-        self.fat.read().read(block_id)
-    }
-
-    // fix
     pub fn root_dir_entry(&self) -> Arc<RwLock<ShortDirEntry>> {
         self.root_dir_entry.clone()
+    }
+
+    pub fn device(&self) -> Arc<dyn BlockDevice> {
+        Arc::clone(&self.device)
     }
 }

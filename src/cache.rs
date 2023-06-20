@@ -1,17 +1,16 @@
-use super::device::BlockDevice;
-use super::{BLOCK_CACHE_LIMIT, BLOCK_SIZE};
+//! 关于 BlockCache 使用 Vec<u8> 的原因: https://github.com/rcore-os/rCore-Tutorial-v3/pull/79
 
-use alloc::sync::Arc;
-// use core::num::NonZeroUsize;
-use core::clone::Clone;
-use core::marker::Sized;
-use core::ops::Drop;
-use core::ops::FnOnce;
-use core::option::Option::{self, None, Some};
+use alloc::{sync::Arc, vec, vec::Vec};
+use core::ops::{Drop, FnOnce};
 use lazy_static::*;
 use lru::LruCache;
-// use alloc::collections::VecDeque;
 use spin::{Mutex, RwLock};
+
+// use core::num::NonZeroUsize;
+// use alloc::collections::VecDeque;
+
+use super::device::BlockDevice;
+use super::{BLOCK_CACHE_LIMIT, BLOCK_SIZE};
 
 pub trait Cache {
     /// The read-only mapper to the block cache
@@ -31,10 +30,9 @@ pub trait Cache {
     fn sync(&mut self);
 }
 
-// TODO
-// 有没有更适合的设计
 pub struct BlockCache {
-    cache: [u8; BLOCK_SIZE],
+    // cache: [u8; BLOCK_SIZE],
+    cache: Vec<u8>,
     // the block id in the disk not in the cluster
     block_id: usize,
     block_device: Arc<dyn BlockDevice>,
@@ -44,7 +42,7 @@ pub struct BlockCache {
 impl BlockCache {
     // load a block from the disk
     pub fn new(block_id: usize, block_device: Arc<dyn BlockDevice>) -> Self {
-        let mut cache = [0u8; BLOCK_SIZE];
+        let mut cache = vec![0 as u8; BLOCK_SIZE];
         block_device
             .read_blocks(&mut cache, block_id * BLOCK_SIZE, 1)
             .unwrap();
@@ -93,6 +91,8 @@ impl Cache for BlockCache {
 
     // write the content back to disk
     fn sync(&mut self) {
+        // TODO
+        // 是否需要考虑引用计数
         if self.modified {
             self.modified = false;
             self.block_device
@@ -100,8 +100,6 @@ impl Cache for BlockCache {
                 .unwrap();
         }
     }
-
-    // TODO 是否需要一个无论是否正在读写文件也要同步的方法(即不考虑是否modified, 这样可以拿读锁)
 }
 
 impl Drop for BlockCache {
@@ -111,10 +109,7 @@ impl Drop for BlockCache {
 }
 
 pub struct BlockCacheManager {
-    // TODO
-    // 是否需要添加一个字段 物理起始块号
     lru: LruCache<usize, Arc<RwLock<BlockCache>>>,
-    // queue: VecDeque<(usize, Arc<RwLock<BlockCache>>)>,
 }
 
 impl BlockCacheManager {
@@ -124,8 +119,6 @@ impl BlockCacheManager {
             //
             // 创建一个不会自动清理的lru_cache
             lru: LruCache::unbounded(),
-
-            // queue: VecDeque::new(),
         }
     }
 
@@ -134,79 +127,37 @@ impl BlockCacheManager {
         &mut self,
         block_id: usize,
         block_device: Arc<dyn BlockDevice>,
-    ) -> Option<Arc<RwLock<BlockCache>>> {
+    ) -> Arc<RwLock<BlockCache>> {
         // if the block is already in lru_cache, just return the copy
         if let Some(pair) = self.lru.get(&block_id) {
-            Some(Arc::clone(pair))
+            Arc::clone(pair)
         } else {
             // 如果不在 lru_cache 中, 就创建一个新的 block_cache
-            // 如果 lru_cache 已经满了, 就把最久没有使用的 block_cache 写回磁盘(不过只有引用计数为 0 的时候才会 drop 写回磁盘)
-            // TODO
-            // 理论上缓存需要有极限, 不过是否要限制呢?
-            if self.lru.len() == BLOCK_CACHE_LIMIT {
-                let (_, block_cache) = self.lru.peek_lru().unwrap();
-                if Arc::strong_count(block_cache) == 1 {
-                    self.lru.pop_lru();
-                } else {
-                    // 否则就返回 None, 让上层直接从磁盘读取
-                    return None;
-                }
-            }
-            // create a new block cache
             let block_cache = Arc::new(RwLock::new(BlockCache::new(
                 block_id,
                 Arc::clone(&block_device),
             )));
-            // Add to the end of lru_cache and return
-            self.lru.put(block_id, Arc::clone(&block_cache));
-            Some(block_cache)
+
+            // 如果 lru_cache 已经满了, 就把最久没有使用的 block_cache 写回磁盘(只有引用计数为 0 的时候才会 drop 写回磁盘)
+            if self.lru.len() == BLOCK_CACHE_LIMIT {
+                let (_, peek_cache) = self.lru.peek_lru().unwrap();
+                if Arc::strong_count(peek_cache) == 1 {
+                    // 如果 is_modified, 会写回磁盘
+                    self.lru.pop_lru();
+                    self.lru.put(block_id, Arc::clone(&block_cache));
+                }
+            } else {
+                // 否则直接插入
+                self.lru.put(block_id, Arc::clone(&block_cache));
+            }
+            block_cache
         }
     }
 
-    // pub fn get_block_cache(
-    //     &mut self,
-    //     block_id: usize,
-    //     block_device: Arc<dyn BlockDevice>,
-    // ) -> Option<Arc<RwLock<BlockCache>>> {
-    //     if let Some(pair) = self.queue.iter().find(|pair| pair.0 == block_id) {
-    //         Some(Arc::clone(&pair.1))
-    //     } else {
-    //         // substitute
-    //         if self.queue.len() == BLOCK_CACHE_LIMIT {
-    //             // from front to tail
-    //             if let Some((idx, _)) = self
-    //                 .queue
-    //                 .iter()
-    //                 .enumerate()
-    //                 .find(|(_, pair)| Arc::strong_count(&pair.1) == 1)
-    //             {
-    //                 self.queue.drain(idx..=idx);
-    //             } else {
-    //                 // panic!("Run out of BlockCache!");
-    //                 return None;
-    //             }
-    //         }
-    //         // load block into mem and push back
-    //         let block_cache = Arc::new(RwLock::new(BlockCache::new(
-    //             block_id,
-    //             Arc::clone(&block_device),
-    //         )));
-    //         self.queue.push_back((block_id, Arc::clone(&block_cache)));
-    //         Some(block_cache)
-    //     }
-    // }
-
-    pub fn clear(&mut self) {
+    pub fn sync_all(&mut self) {
         for (_, block_cache) in self.lru.iter() {
             block_cache.write().sync();
         }
-        // TODO
-        // 是否需要考虑引用计数
-        // self.lru.clear();
-
-        // for (_, block_cache) in self.queue.iter() {
-        //     block_cache.write().sync();
-        // }
     }
 }
 
@@ -220,20 +171,12 @@ lazy_static! {
 pub fn get_block_cache(
     block_id: usize,
     block_device: Arc<dyn BlockDevice>,
-) -> Option<Arc<RwLock<BlockCache>>> {
-    // TODO
-    // 是否需要添加一个字段 物理起始块号 phy_blk_id = start_sec + block_id (似乎实际上的块编号并非从 disk 的 0 地址开始的)
+) -> Arc<RwLock<BlockCache>> {
     BLOCK_CACHE_MANAGER
-        // TODO 区分 BLOCK_CACHE_MANAGER 的读写锁
         .lock()
         .get_block_cache(block_id, block_device)
 }
 
 pub fn sync_all() {
-    BLOCK_CACHE_MANAGER.lock().clear();
-
-    // let manager = BLOCK_CACHE_MANAGER.lock();
-    // for (_, cache) in manager.queue.iter() {
-    //     cache.write().sync();
-    // }
+    BLOCK_CACHE_MANAGER.lock().sync_all();
 }

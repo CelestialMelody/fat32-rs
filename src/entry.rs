@@ -7,7 +7,9 @@
 //! ".." files as the first two directory entries in the directory. The only other special aspect of the root
 //! directory is that it is the only directory on the FAT volume for which it is valid to have a file that has
 //! only the ATTR_VOLUME_ID attribute bit set.
-
+//!
+//!
+//!
 //! Dir_Name[0]
 //!
 //! DIR_Name[0]
@@ -41,7 +43,7 @@
 //! FAT file system on disk data structure is all "little endian".
 //! This is important if your machine is a "big endian" machine, because you will have to translate
 //! between big and little endian as you move data to and from the disk.
-
+//!
 //! When a directory is created, a file with the ATTR_DIRECTORY bit set in its DIR_Attr field, you set
 //! its DIR_FileSize to 0. DIR_FileSize is not used and is always 0 on a file with the
 //! ATTR_DIRECTORY attribute (directories are sized by simply following their cluster chains to the
@@ -67,7 +69,7 @@
 //! - The dot entry is a directory that points to itself.
 //! - The dotdot entry points to the starting cluster of the parent of this directory (which is 0 if this
 //!   directories parent is the root directory).
-
+//!
 //! Organization and Association of Short & Long Directory Entries
 //!
 //! A set of long entries is always associated with a short entry that they always immediately precede.
@@ -102,7 +104,7 @@
 //! information and need not replicate information already available in the short entry. Principally, the
 //! long entries contain the long name of a file. The name contained in a short entry which is associated
 //! with a set of long entries is termed the alias name, or simply alias, of the file.
-
+//!
 //!Storage of a Long-Name Within Long Directory Entries
 //!
 //! A long name can consist of more characters than can fit in a single long directory entry. When this
@@ -112,7 +114,9 @@
 //! 0xFFFF characters in order to detect corruption of long name fields by errant disk utilities. A name
 //! that fits exactly in a n long directory entries (i.e. is an integer multiple of 13) is not NUL terminated
 //! and not padded with 0xFFFFs.
-
+//!
+//!
+//!
 //! Short Directory Entries
 //!
 //! [`ShortDirEntry`]
@@ -133,7 +137,8 @@
 //! the extended character provides. This mapping also prevents the creation of some file names that
 //! would normally differ, but because of the mapping to upper case they become the same file name.
 //!
-
+//!
+//!
 //! Long Directory Entries
 //!
 //! [`LongDirEntry`]
@@ -158,7 +163,7 @@
 //! Long names passed to the file system are not converted to upper case and their original case value is
 //! preserved. UNICODE solves the case mapping problem prevalent in some OEM code pages by
 //! always providing a translation for lower case characters to a single, unique upper case character.
-
+//!
 //! Name Matching In Short & Long Names
 //!
 //! The names contained in the set of all short directory entries are termed the "short name space". The
@@ -186,24 +191,23 @@
 //! the "_" (underscore) character as it is returned to the user – it is NOT modified on the disk. This
 //! character is the same in all OEM code pages and ANSI.
 
-//! FAT Long Directory Entries
-//!
+#![allow(unused)]
 
-// #![allow(unused)]
+use alloc::string::{String, ToString};
+use core::{
+    default::Default,
+    iter::Iterator,
+    option::Option::{None, Some},
+    str,
+};
 
-use super::vfs::VirFileType;
 use super::{
-    ATTR_ARCHIVE, ATTR_DIRECTORY, ATTR_HIDDEN, ATTR_LONG_NAME, ATTR_READ_ONLY, ATTR_SYSTEM,
-    ATTR_VOLUME_ID, DIR_ENTRY_LAST_AND_UNUSED, DIR_ENTRY_UNUSED, LAST_LONG_ENTRY,
+    vfs::VirtFileType, ATTR_ARCHIVE, ATTR_DIRECTORY, ATTR_HIDDEN, ATTR_LONG_NAME, ATTR_READ_ONLY,
+    ATTR_SYSTEM, ATTR_VOLUME_ID, DIR_ENTRY_LAST_AND_UNUSED, DIR_ENTRY_UNUSED, LAST_LONG_ENTRY,
     LONG_NAME_LEN_CAP, SPACE,
 };
 
-use alloc::string::{String, ToString};
-use core::default::Default;
-use core::iter::Iterator;
-use core::option::Option::{self, None, Some};
-use core::str;
-
+#[allow(unused)]
 #[derive(PartialEq, Debug, Clone, Copy)]
 #[repr(u8)]
 pub enum FATAttr {
@@ -257,7 +261,7 @@ pub struct ShortDirEntry {
     ///
     /// size: 1 byte      offset: 12 Bytes (0xC)    value: 0x00
     //
-    //  这个位默认为 0,只有短文件名时才有用. 一般初始化为 0 后不再修改, 可能的用法为:
+    //  这个位默认为 0, 只有短文件名时才有用. 一般初始化为 0 后不再修改, 可能的用法为:
     //  当为 0x00 时为文件名全大写, 当为 0x08 时为文件名全小写;
     //  0x10 时扩展名全大写, 0x00 扩展名全小写; 当为 0x18 时为文件名全小写, 扩展名全大写
     nt_res: u8,
@@ -332,7 +336,7 @@ impl Default for ShortDirEntry {
 
 impl ShortDirEntry {
     // All names must check if they have existed in the directory
-    pub fn new(cluster: u32, name: &[u8], extension: &[u8], create_type: VirFileType) -> Self {
+    pub fn new(cluster: u32, name: &[u8], extension: &[u8], create_type: VirtFileType) -> Self {
         let mut item = Self::empty();
         let mut name_: [u8; 8] = [SPACE; 8];
         let mut extension_: [u8; 3] = [SPACE; 3];
@@ -345,89 +349,11 @@ impl ShortDirEntry {
         item.name = name_;
         item.extension = extension_;
         match create_type {
-            VirFileType::File => item.attr = ATTR_ARCHIVE,
-            VirFileType::Dir => item.attr = ATTR_DIRECTORY,
+            VirtFileType::File => item.attr = ATTR_ARCHIVE,
+            VirtFileType::Dir => item.attr = ATTR_DIRECTORY,
         }
         item.set_first_cluster(cluster);
         item
-    }
-
-    // All names must check if they have existed in the directory
-    pub fn new_form_name_str(cluster: u32, name_str: &str, create_type: VirFileType) -> Self {
-        let (name, extension) = match name_str.find('.') {
-            Some(i) => (&name_str[0..i], &name_str[i + 1..]),
-            None => (&name_str[0..], ""),
-        };
-
-        let mut item = [0; 32];
-        let _item = [SPACE; 11]; // invalid name
-
-        // 初始化为 0x20, 0x20 为 ASCII 码中的空格字符; 0x00..0x0B = 0..11
-        item[0x00..0x0B].copy_from_slice(&_item);
-        // name 的长度可能不足 8 个字节; 0..name.len()
-        item[0x00..0x00 + name.len()].copy_from_slice(name.as_bytes());
-        // ext 的长度可能不足 3 个字节; 8..extension.len()
-        item[0x08..0x08 + extension.len()].copy_from_slice(extension.as_bytes());
-
-        // 将 name 和 ext 部分转换为大写
-        //
-        // "Short names passed to the file system are always converted to upper case and their original case value is lost"
-        //
-        item[0x00..0x00 + name.len()].make_ascii_uppercase();
-        item[0x08..0x08 + extension.len()].make_ascii_uppercase();
-
-        // Q: 采用小端还是大端序存储数据?
-        // A: 采用小端序存储数据, 与 FAT32 文件系统的存储方式一致
-        //
-        // FAT file system on disk data structure is all "little endian".
-        //
-        // to_le_bytes() 方法将 u32 类型的数据转换为 小端序 的字节数组
-        // eg. 0x12345678 -> [0x78, 0x56, 0x34, 0x12]
-        let cluster: [u8; 4] = cluster.to_le_bytes();
-
-        // 0x1A~0x1B 字节为文件内容起始簇号的低两个字节, 与 0x14~0x15 字节处的高两个字节组成文件内容起始簇号
-        item[0x14..0x16].copy_from_slice(&cluster[2..4]);
-        item[0x1A..0x1C].copy_from_slice(&cluster[0..2]);
-
-        match create_type {
-            VirFileType::Dir => item[0x0B] = ATTR_DIRECTORY,
-            VirFileType::File => item[0x10] = ATTR_ARCHIVE,
-        }
-
-        unsafe { *(item.as_ptr() as *const ShortDirEntry) }
-    }
-
-    // All names must check if they have existed in the directory
-    pub fn new_from_name_bytes(cluster: u32, name_bytes: &[u8], create_type: VirFileType) -> Self {
-        let mut item = [0; 32];
-        item[0x00..0x0B].copy_from_slice(name_bytes);
-
-        item[0x00..0x00 + name_bytes.len()].make_ascii_uppercase();
-
-        let mut cluster: [u8; 4] = cluster.to_be_bytes();
-        cluster.reverse();
-
-        item[0x14..0x16].copy_from_slice(&cluster[2..4]);
-        item[0x1A..0x1C].copy_from_slice(&cluster[0..2]);
-
-        match create_type {
-            VirFileType::Dir => item[0x0B] = ATTR_DIRECTORY,
-            VirFileType::File => item[0x10] = ATTR_ARCHIVE,
-        }
-
-        unsafe { *(item.as_ptr() as *const ShortDirEntry) }
-    }
-
-    // All names must check if they have existed in the directory
-    pub fn set_name(&mut self, name: &[u8], extension: &[u8]) {
-        let mut name_: [u8; 8] = [SPACE; 8];
-        name_[0..name.len()].make_ascii_uppercase();
-        name_[0..name.len()].copy_from_slice(name);
-
-        let mut extension_: [u8; 3] = [SPACE; 3];
-        extension_[0..extension.len()].make_ascii_uppercase();
-        extension_[0..extension.len()].copy_from_slice(extension);
-        self.name = name_;
     }
 
     pub fn gen_check_sum(&self) -> u8 {
@@ -465,6 +391,60 @@ impl ShortDirEntry {
             } else {
                 as_u8str!(self.name[0..name_len]).to_string()
             }
+        }
+    }
+
+    // Get the start cluster number of the file
+    pub fn first_cluster(&self) -> u32 {
+        ((self.fst_clus_hi as u32) << 16) + (self.fst_clus_lo as u32)
+    }
+
+    // Set the start cluster number of the file
+    pub fn set_first_cluster(&mut self, cluster: u32) {
+        self.fst_clus_hi = ((cluster & 0xFFFF0000) >> 16) as u16;
+        self.fst_clus_lo = (cluster & 0x0000FFFF) as u16;
+    }
+
+    pub fn is_deleted(&self) -> bool {
+        self.name[0] == DIR_ENTRY_UNUSED
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.name[0] == DIR_ENTRY_LAST_AND_UNUSED
+    }
+
+    pub fn delete(&mut self) {
+        self.file_size = 0;
+        self.set_first_cluster(0);
+        self.name[0] = DIR_ENTRY_UNUSED;
+    }
+
+    pub fn file_size(&self) -> u32 {
+        self.file_size
+    }
+
+    pub fn set_file_size(&mut self, file_size: u32) {
+        self.file_size = file_size;
+    }
+}
+
+#[allow(unused)]
+impl ShortDirEntry {
+    pub fn empty() -> Self {
+        Self {
+            name: [0; 8],
+            extension: [0; 3],
+            attr: ATTR_ARCHIVE,
+            nt_res: 0,
+            crt_time_tenth: 0,
+            crt_time: 0,
+            crt_date: 0,
+            lst_acc_date: 0,
+            fst_clus_hi: 0,
+            wrt_time: 0,
+            wrt_date: 0,
+            fst_clus_lo: 0,
+            file_size: 0,
         }
     }
 
@@ -514,47 +494,86 @@ impl ShortDirEntry {
 
         full_name
     }
-}
 
-impl ShortDirEntry {
-    pub fn empty() -> Self {
-        Self {
-            name: [0; 8],
-            extension: [0; 3],
-            attr: ATTR_ARCHIVE,
-            nt_res: 0,
-            crt_time_tenth: 0,
-            crt_time: 0,
-            crt_date: 0,
-            lst_acc_date: 0,
-            fst_clus_hi: 0,
-            wrt_time: 0,
-            wrt_date: 0,
-            fst_clus_lo: 0,
-            file_size: 0,
+    // All names must check if they have existed in the directory
+    pub fn new_form_name_str(cluster: u32, name_str: &str, create_type: VirtFileType) -> Self {
+        let (name, extension) = match name_str.find('.') {
+            Some(i) => (&name_str[0..i], &name_str[i + 1..]),
+            None => (&name_str[0..], ""),
+        };
+
+        let mut item = [0; 32];
+        let _item = [SPACE; 11];
+
+        // 初始化为 0x20, 0x20 为 ASCII 码中的空格字符; 0x00..0x0B = 0..11
+        item[0x00..0x0B].copy_from_slice(&_item);
+        // name 的长度可能不足 8 个字节; 0..name.len()
+        item[0x00..0x00 + name.len()].copy_from_slice(name.as_bytes());
+        // ext 的长度可能不足 3 个字节; 8..extension.len()
+        item[0x08..0x08 + extension.len()].copy_from_slice(extension.as_bytes());
+
+        // 将 name 和 ext 部分转换为大写
+        //
+        // "Short names passed to the file system are always converted to upper case and their original case value is lost"
+        //
+        item[0x00..0x00 + name.len()].make_ascii_uppercase();
+        item[0x08..0x08 + extension.len()].make_ascii_uppercase();
+
+        // 采用小端序存储数据, 与 FAT32 文件系统的存储方式一致
+        //
+        // FAT file system on disk data structure is all "little endian".
+        //
+        // to_le_bytes() 方法将 u32 类型的数据转换为 小端序 的字节数组
+        // eg. 0x12345678 -> [0x78, 0x56, 0x34, 0x12]
+        let cluster: [u8; 4] = cluster.to_le_bytes();
+
+        // 0x1A~0x1B 字节为文件内容起始簇号的低两个字节, 与 0x14~0x15 字节处的高两个字节组成文件内容起始簇号
+        item[0x14..0x16].copy_from_slice(&cluster[2..4]);
+        item[0x1A..0x1C].copy_from_slice(&cluster[0..2]);
+
+        match create_type {
+            VirtFileType::Dir => item[0x0B] = ATTR_DIRECTORY,
+            VirtFileType::File => item[0x10] = ATTR_ARCHIVE,
         }
+
+        unsafe { *(item.as_ptr() as *const ShortDirEntry) }
     }
 
-    pub fn root_dir(cluster: u32) -> Self {
-        let mut item = Self::empty();
-        item.set_first_cluster(cluster);
-        item.attr = ATTR_DIRECTORY;
-        item
+    // All names must check if they have existed in the directory
+    pub fn new_from_name_bytes(cluster: u32, name_bytes: &[u8], create_type: VirtFileType) -> Self {
+        let mut item = [0; 32];
+        item[0x00..0x0B].copy_from_slice(name_bytes);
+
+        item[0x00..0x00 + name_bytes.len()].make_ascii_uppercase();
+
+        let mut cluster: [u8; 4] = cluster.to_be_bytes();
+        cluster.reverse();
+
+        item[0x14..0x16].copy_from_slice(&cluster[2..4]);
+        item[0x1A..0x1C].copy_from_slice(&cluster[0..2]);
+
+        match create_type {
+            VirtFileType::Dir => item[0x0B] = ATTR_DIRECTORY,
+            VirtFileType::File => item[0x10] = ATTR_ARCHIVE,
+        }
+
+        unsafe { *(item.as_ptr() as *const ShortDirEntry) }
+    }
+
+    // All names must check if they have existed in the directory
+    pub fn set_name(&mut self, name: &[u8], extension: &[u8]) {
+        let mut name_: [u8; 8] = [SPACE; 8];
+        name_[0..name.len()].make_ascii_uppercase();
+        name_[0..name.len()].copy_from_slice(name);
+
+        let mut extension_: [u8; 3] = [SPACE; 3];
+        extension_[0..extension.len()].make_ascii_uppercase();
+        extension_[0..extension.len()].copy_from_slice(extension);
+        self.name = name_;
     }
 
     pub fn set_name_case(&mut self, state: u8) {
         self.nt_res = state;
-    }
-
-    // Get the start cluster number of the file
-    pub fn first_cluster(&self) -> u32 {
-        ((self.fst_clus_hi as u32) << 16) + (self.fst_clus_lo as u32)
-    }
-
-    // Set the start cluster number of the file
-    pub fn set_first_cluster(&mut self, cluster: u32) {
-        self.fst_clus_hi = ((cluster & 0xFFFF0000) >> 16) as u16;
-        self.fst_clus_lo = (cluster & 0x0000FFFF) as u16;
     }
 
     /// directory entry is free
@@ -564,14 +583,7 @@ impl ShortDirEntry {
             || self.name[0] == 0x05
     }
 
-    pub fn is_deleted(&self) -> bool {
-        self.name[0] == DIR_ENTRY_UNUSED
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.name[0] == DIR_ENTRY_LAST_AND_UNUSED
-    }
-
+    // 见文件顶部的 Name[0] 说明
     pub fn is_valid_name(&self) -> bool {
         if self.name[0] < 0x20 {
             return self.name[0] == 0x05;
@@ -624,10 +636,6 @@ impl ShortDirEntry {
         self.attr == ATTR_DIRECTORY
     }
 
-    pub fn is_long(&self) -> bool {
-        self.attr as u8 == ATTR_LONG_NAME
-    }
-
     pub fn is_file(&self) -> bool {
         self.attr == ATTR_ARCHIVE
             || self.attr == ATTR_HIDDEN
@@ -641,14 +649,6 @@ impl ShortDirEntry {
 
     pub fn set_attr(&mut self, attr: u8) {
         self.attr = attr;
-    }
-
-    pub fn file_size(&self) -> u32 {
-        self.file_size
-    }
-
-    pub fn set_file_size(&mut self, file_size: u32) {
-        self.file_size = file_size;
     }
 
     pub fn get_name_uppercase(&self) -> String {
@@ -675,12 +675,6 @@ impl ShortDirEntry {
 
     pub fn get_name_lowercase(&self) -> String {
         self.get_name_uppercase().to_ascii_lowercase()
-    }
-
-    pub fn delete(&mut self) {
-        self.file_size = 0;
-        self.set_first_cluster(0);
-        self.name[0] = DIR_ENTRY_UNUSED;
     }
 
     pub fn as_bytes_mut(&mut self) -> &mut [u8] {
@@ -710,6 +704,7 @@ impl ShortDirEntry {
     }
 }
 
+#[allow(unused)]
 impl ShortDirEntry {
     pub fn set_create_time(&mut self, time: u16) {
         self.crt_time = time;
@@ -738,7 +733,7 @@ impl ShortDirEntry {
 ///
 /// 1 + 2*5 + 1 + 1 + 2 + 2*6 + 2 + 2*2 = 32 bytes
 //
-//  TODO: Name charactor check
+//  TODO Name charactor check
 pub struct LongDirEntry {
     /// The order of this entry in the sequence of long dir entries.
     /// It is associated with the short dir entry at the end of the long dir set,
@@ -830,27 +825,6 @@ impl LongDirEntry {
         lde
     }
 
-    pub fn set_name(&mut self, name_array: [u16; 13]) {
-        unsafe {
-            core::ptr::addr_of_mut!(self.name1)
-                // try_into() 被用来尝试将 partial_name[..5] 转换成一个大小为 5 的固定大小数组
-                .write_unaligned(name_array[..5].try_into().expect("Failed to cast!"));
-            core::ptr::addr_of_mut!(self.name2)
-                .write_unaligned(name_array[5..11].try_into().expect("Failed to cast!"));
-            core::ptr::addr_of_mut!(self.name3)
-                .write_unaligned(name_array[11..].try_into().expect("Failed to cast!"));
-        }
-    }
-
-    pub fn new(order: u8, check_sum: u8, name_str: &str) -> Self {
-        let mut buf = [0; 32];
-        buf[0x00] = order;
-        buf[0x0B] = ATTR_LONG_NAME;
-        buf[0x0D] = check_sum;
-        Self::write_unicode(name_str, &mut buf);
-        Self::new_form_bytes(&buf)
-    }
-
     pub fn name(&self) -> String {
         let name_all = self.name_utf16();
         let len = (0..name_all.len())
@@ -874,7 +848,29 @@ impl LongDirEntry {
     }
 }
 
+#[allow(unused)]
 impl LongDirEntry {
+    pub fn set_name(&mut self, name_array: [u16; 13]) {
+        unsafe {
+            core::ptr::addr_of_mut!(self.name1)
+                // try_into() 被用来尝试将 partial_name[..5] 转换成一个大小为 5 的固定大小数组
+                .write_unaligned(name_array[..5].try_into().expect("Failed to cast!"));
+            core::ptr::addr_of_mut!(self.name2)
+                .write_unaligned(name_array[5..11].try_into().expect("Failed to cast!"));
+            core::ptr::addr_of_mut!(self.name3)
+                .write_unaligned(name_array[11..].try_into().expect("Failed to cast!"));
+        }
+    }
+
+    pub fn new(order: u8, check_sum: u8, name_str: &str) -> Self {
+        let mut buf = [0; 32];
+        buf[0x00] = order;
+        buf[0x0B] = ATTR_LONG_NAME;
+        buf[0x0D] = check_sum;
+        Self::write_unicode(name_str, &mut buf);
+        Self::new_form_bytes(&buf)
+    }
+
     pub fn empty() -> Self {
         Self {
             ord: 0u8,
@@ -1042,6 +1038,7 @@ impl LongDirEntry {
     }
 }
 
+#[allow(unused)]
 pub(crate) enum NameType {
     SFN,
     LFN,

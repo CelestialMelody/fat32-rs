@@ -1,25 +1,31 @@
-//! 当前代码实现规定
-//! 从数据区开始 对 cluster 进行编号, 从 2 开始
-//! 计算偏移 offset = BLOCK_SIZE * (bpb.first_data_sector + (cluster - 2) * bpb.sector_per_cluster)
-//! 关于块/扇区/簇的变量命名:  block_id 在存储介质从 0 开始 从 0 编号, cluster_id 为从 数据区开始从 2 开始的簇号
-//! cluster 为从数据区开始的簇号, 从 2 开始编号, 其他命名尽量容易理解 如 block_id_in_cluster 为簇内块号
-
-use super::cache::get_block_cache;
-use super::read_le_u32;
-
-use super::cache::Cache;
-use super::device::BlockDevice;
-use super::{BLOCK_SIZE, CLUSTER_MASK, END_OF_CLUSTER, NEW_VIR_FILE_CLUSTER};
+//! FAT表管理
+//!
+//!
+//!
+//! 注意:
+//! - 从数据区开始, 对 cluster 进行编号, 编号从 2 开始;
+//!   计算在磁盘中的偏移 offset = BLOCK_SIZE * (bpb.first_data_sector + (cluster - 2) * bpb.sector_per_cluster)
+//! - block_id 在存储介质从 0 开始 从 0 编号;
+//!   计算在磁盘中的偏移 offset = BLOCK_SIZE * block_id
+//! - 其他命名尽量容易理解 如 block_id_in_cluster 为簇内块号
 
 use alloc::collections::VecDeque;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
-use core::assert;
-use core::clone::Clone;
-use core::fmt::Debug;
-use core::iter::Iterator;
-use core::option::Option::{self, None, Some};
-use core::result::Result::{self, Err, Ok};
+use core::{
+    assert,
+    clone::Clone,
+    fmt::Debug,
+    iter::Iterator,
+    option::Option,
+    option::Option::{None, Some},
+};
+
+use super::{
+    cache::{get_block_cache, Cache},
+    device::BlockDevice,
+    read_le_u32, BLOCK_SIZE, CLUSTER_MASK, END_OF_CLUSTER, NEW_VIR_FILE_CLUSTER,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ClusterChainErr {
@@ -35,13 +41,13 @@ pub enum ClusterChainErr {
 /// Like a Dual-Linked List.
 //
 //  单个文件/目录的簇号链表
-//  注意, 整个 Fat 表的簇号从 2 开始, 0 和 1 为保留簇号, 0 表示无效簇号, 1 表示最后一个簇号,
-//  但我们在数据区以 cluster_size 为单位从 0 开始编号, 故根据 cluster_id 求出偏移时 cluster_id - 2
+//  注意, 整个 Fat 表的簇号从 2 开始, 0 和 1 为保留簇号;
+//  根据 cluster_id 求出偏移时, 数据区以 cluster_size 为单位从 0 开始计算, cluster_id - 2
 pub struct ClusterChain {
     pub(crate) device: Arc<dyn BlockDevice>,
     // FAT表的偏移, 也是 start_cluster 的第一个 sector 的偏移
     // 目前仅指 FAT1, 可以通过 BIOSParameterBlock::fat1() 方法获取
-    // TODO: 支持 FAT2
+    // TODO 支持 FAT2
     pub(crate) fat1_offset: usize, // read_only
     // 簇号链表的起始簇号 (短目录项可以提供)
     pub(crate) start_cluster: u32, // 创建一次不再改变
@@ -50,9 +56,10 @@ pub struct ClusterChain {
     /// Therefore, previous_cluster and next_cluster are invalid.
     /// Use next() to get the first cluster.
     //
-    //  Note
-    //  current_cluster == 0 相当于头节点, 此时 previous_cluster, next_cluster 无效.
-    //  需要调用 .next() 方法获取第一个簇号; 或当使用迭代器时, 会自动从 start_cluster 开始
+    //  注意:
+    //  1. current_cluster == 0 相当于头节点, 此时 previous_cluster, next_cluster 无效.
+    //  2. 需要调用 .next() 方法获取第一个簇号
+    //  3. 当使用迭代器时, 会自动从 start_cluster 开始
     pub(crate) current_cluster: u32,
     pub(crate) next_cluster: Option<u32>,
 }
@@ -86,21 +93,6 @@ impl ClusterChain {
         self.start_cluster = start_cluster;
     }
 
-    /// Change current cluster to previous cluster, and return the previous cluster.
-    pub(crate) fn previous(&mut self) -> Result<(), ClusterChainErr> {
-        // self.previous_cluster is unchanged(unknown)
-        // 故仅仅能向前一步
-        assert!(self.current_cluster != 0);
-        self.next_cluster = Some(self.current_cluster);
-        if self.previous_is_none() {
-            Err(ClusterChainErr::NonePreviousCluster)
-        } else {
-            self.current_cluster = self.previous_cluster.unwrap();
-            self.previous_cluster = None;
-            Ok(())
-        }
-    }
-
     pub(crate) fn next_is_none(&self) -> bool {
         self.next_cluster.is_none()
     }
@@ -116,7 +108,6 @@ impl Iterator for ClusterChain {
     // 最后一个 fat 簇:
     // - current_cluster = EOC(仍然有数据)
     // - next_cluster = None
-    // - previous_cluster =
     fn next(&mut self) -> Option<Self::Item> {
         if self.current_cluster == NEW_VIR_FILE_CLUSTER {
             // 对于 write_append 结合 refresh 有其他作用:
@@ -126,6 +117,7 @@ impl Iterator for ClusterChain {
             // 则到磁盘或缓存中的 fat 表中读取.
             // 注意 next() 结束后 previous_cluster, start_cluster 被修改为正确的值.
             self.current_cluster = self.start_cluster;
+            self.previous_cluster = None;
         } else {
             let next_cluster = self.next_cluster;
             if next_cluster.is_some() {
@@ -140,19 +132,14 @@ impl Iterator for ClusterChain {
         let block_offset = offset / BLOCK_SIZE;
         let offset_left = offset % BLOCK_SIZE;
 
-        assert!(self.fat1_offset % BLOCK_SIZE == 0);
         let block_id = self.fat1_offset / BLOCK_SIZE + block_offset;
         let mut buffer = [0u8; BLOCK_SIZE];
-        let option = get_block_cache(block_id, Arc::clone(&self.device));
-        if let Some(cache) = option {
-            cache.read().read(0, |buf: &[u8; BLOCK_SIZE]| {
+
+        get_block_cache(block_id, Arc::clone(&self.device))
+            .read()
+            .read(0, |buf: &[u8; BLOCK_SIZE]| {
                 buffer.copy_from_slice(buf);
-            })
-        } else {
-            self.device
-                .read_blocks(&mut buffer, self.fat1_offset + block_offset * BLOCK_SIZE, 1)
-                .unwrap();
-        }
+            });
 
         let next_cluster = read_le_u32(&buffer[offset_left..offset_left + 4]);
         let next_cluster = if next_cluster >= END_OF_CLUSTER {
@@ -192,14 +179,6 @@ impl FATManager {
         }
     }
 
-    pub fn read(&self, block_id: usize) -> [u8; BLOCK_SIZE] {
-        let mut buffer = [0u8; BLOCK_SIZE];
-        self.device
-            .read_blocks(&mut buffer, self.fat1_offset + block_id * BLOCK_SIZE, 1)
-            .unwrap();
-        buffer
-    }
-
     pub fn new(fat_offset: usize, device: Arc<dyn BlockDevice>) -> Self {
         let fat = Self {
             device: Arc::clone(&device),
@@ -213,7 +192,6 @@ impl FATManager {
 
         assert!(fat.fat1_offset % BLOCK_SIZE == 0);
         get_block_cache(block_id, Arc::clone(&device))
-            .unwrap()
             .write()
             .modify(0, |buf: &mut [u32; 2]| {
                 buf[0] = END_OF_CLUSTER;
@@ -251,16 +229,11 @@ impl FATManager {
 
         loop {
             let (block_id, offset) = self.cluster_id_pos(cluster);
-            let option = get_block_cache(block_id, Arc::clone(&self.device));
-            if let Some(block) = option {
-                block.read().read(0, |buf: &[u8; BLOCK_SIZE]| {
+            get_block_cache(block_id, Arc::clone(&self.device))
+                .read()
+                .read(0, |buf: &[u8; BLOCK_SIZE]| {
                     buffer.copy_from_slice(buf);
-                })
-            } else {
-                self.device
-                    .read_blocks(&mut buffer, block_id * BLOCK_SIZE, 1)
-                    .unwrap();
-            }
+                });
             for i in (offset..BLOCK_SIZE).step_by(4) {
                 if read_le_u32(&buffer[i..i + 4]) == 0 {
                     done = true;
@@ -291,24 +264,14 @@ impl FATManager {
 
     // Query the next cluster of the specific cluster
     //
-    // 最后一个簇的值, next_cluster 可能等于 0x0FFFFFFF
+    // 最后一个簇的值, next_cluster 可能等于 EOC
     pub fn get_next_cluster(&self, cluster: u32) -> Option<u32> {
         let (block_id, offset_in_block) = self.cluster_id_pos(cluster);
 
-        let option = get_block_cache(block_id, Arc::clone(&self.device));
+        let next_cluster: u32 = get_block_cache(block_id, Arc::clone(&self.device))
+            .read()
+            .read(offset_in_block, |&next_cluster: &u32| next_cluster);
 
-        let next_cluster: u32;
-        if let Some(cache) = option {
-            next_cluster = cache
-                .read()
-                .read(offset_in_block, |&next_cluster: &u32| next_cluster);
-        } else {
-            let mut buffer = [0u8; BLOCK_SIZE];
-            self.device
-                .read_blocks(&mut buffer, block_id * BLOCK_SIZE, 1)
-                .unwrap();
-            next_cluster = read_le_u32(&buffer[offset_in_block..offset_in_block + 4]);
-        }
         assert!(next_cluster >= 2);
         if next_cluster >= END_OF_CLUSTER {
             None
@@ -322,22 +285,11 @@ impl FATManager {
     // 在磁盘的FAT表中的簇号 cluster(offset) 处写入 cluster 的 value(下一个簇号)
     pub fn set_next_cluster(&self, cluster: u32, next_cluster: u32) {
         let (block_id, offset_in_block) = self.cluster_id_pos(cluster);
-        let option = get_block_cache(block_id, Arc::clone(&self.device));
-        if let Some(cache) = option {
-            cache.write().modify(offset_in_block, |value: &mut u32| {
+        get_block_cache(block_id, Arc::clone(&self.device))
+            .write()
+            .modify(offset_in_block, |value: &mut u32| {
                 *value = next_cluster;
             });
-        } else {
-            let mut buffer = [0u8; BLOCK_SIZE];
-            self.device
-                .read_blocks(&mut buffer, block_id * BLOCK_SIZE, 1)
-                .unwrap();
-            buffer[offset_in_block..offset_in_block + 4]
-                .copy_from_slice(&next_cluster.to_le_bytes());
-            self.device
-                .write_blocks(&buffer, block_id * BLOCK_SIZE, 1)
-                .unwrap();
-        }
     }
 
     // Get the ith cluster of a cluster chain

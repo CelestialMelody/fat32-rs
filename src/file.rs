@@ -1,17 +1,22 @@
-use super::cache::Cache;
-use super::vfs::VirFile;
+//! 简单的文件 Trait
+//! 为 VirtFile 实现 File Trait
 
-use super::{BLOCK_SIZE, NEW_VIR_FILE_CLUSTER};
-
-use super::cache::get_block_cache;
-use super::get_needed_sector;
+#![allow(unused)]
 
 use alloc::sync::Arc;
-use alloc::vec::Vec;
-use core::clone::Clone;
-use core::cmp::Ord;
-use core::option::Option::{self, None, Some};
-use core::result::Result::{self, Err, Ok};
+use core::{
+    clone::Clone,
+    cmp::Ord,
+    result::Result,
+    result::Result::{Err, Ok},
+};
+
+use super::{
+    cache::{get_block_cache, Cache},
+    get_needed_sector,
+    vfs::VirtFile,
+    BLOCK_SIZE, NEW_VIR_FILE_CLUSTER,
+};
 
 pub trait File {
     fn read(&self, buf: &mut [u8]) -> Result<usize, FileError>;
@@ -33,7 +38,7 @@ pub enum FileError {
     BadClusterChain,
 }
 
-impl File for VirFile {
+impl File for VirtFile {
     /// Read File To Buffer, Return File Length
     fn read(&self, buf: &mut [u8]) -> Result<usize, FileError> {
         let file_size = self.file_size();
@@ -67,39 +72,22 @@ impl File for VirFile {
                 for i in 0..block_cnt {
                     assert!(offset_in_disk % BLOCK_SIZE == 0);
                     let block_id = offset_in_disk / BLOCK_SIZE + i;
-                    let option = get_block_cache(block_id, Arc::clone(&self.device));
-                    if let Some(cache) = option {
-                        let len = (BLOCK_SIZE).min(end - index);
+                    let len = (BLOCK_SIZE).min(end - index);
+                    let mut block_buffer = [0u8; BLOCK_SIZE];
 
-                        let mut block_buffer = [0u8; BLOCK_SIZE];
-                        cache.read().read(0, |buffer: &[u8; BLOCK_SIZE]| {
+                    let device = self.fs.read().device();
+                    get_block_cache(block_id, device).read().read(
+                        0,
+                        |buffer: &[u8; BLOCK_SIZE]| {
                             block_buffer.copy_from_slice(buffer);
-                        });
+                        },
+                    );
 
-                        let dst = &mut buf[index..index + len];
-                        let src = &block_buffer[0..len];
-                        dst.copy_from_slice(src);
+                    let dst = &mut buf[index..index + len];
+                    let src = &block_buffer[0..len];
+                    dst.copy_from_slice(src);
 
-                        index += len;
-                    } else {
-                        // TODO
-                        // 使用更小/合适的缓存
-                        let mut cluster_buffer = Vec::<u8>::with_capacity(cluster_size);
-                        let len = end - index;
-                        self.device
-                            .read_blocks(
-                                cluster_buffer.as_mut_slice(),
-                                offset_in_disk + i * BLOCK_SIZE,
-                                block_cnt - i,
-                            )
-                            .unwrap();
-
-                        let dst = &mut buf[index..index + len];
-                        let src = &cluster_buffer[i * BLOCK_SIZE..i * BLOCK_SIZE + len];
-                        dst.copy_from_slice(src);
-
-                        index += len;
-                    }
+                    index += len;
                 }
             })
             .last();

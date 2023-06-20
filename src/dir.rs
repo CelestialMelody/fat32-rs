@@ -1,24 +1,44 @@
-use super::entry::{LongDirEntry, ShortDirEntry};
-use super::vfs::{DirEntryPos, VirFile, VirFileType};
+//! 简单的目录 Trait
+//! 为 VirtFile 实现 Dir Trait
+//!
+//!
+//!
+//! 磁盘中目录文件下目录项布局:(低地址 -> 高地址)
+//! fileA_lde_n
+//! fileA_lde_n-1
+//! ...
+//! fileA_lde_1
+//! fileA_sde
+//! fileB_lde_n
+//! fileB_lde_n-1
+//! ...
+//! fileB_lde_1
+//! fileB_sde
+//! ...
+//!
+//! 注意: Fat32 规定目录文件的大小为 0
 
-use alloc::string::String;
-use alloc::sync::Arc;
-use alloc::vec::Vec;
+use alloc::{string::String, sync::Arc, vec::Vec};
+use core::{
+    assert, assert_eq,
+    clone::Clone,
+    convert::From,
+    option::Option,
+    option::Option::{None, Some},
+    result::Result,
+    result::Result::{Err, Ok},
+};
 use spin::RwLock;
 
-use core::clone::Clone;
-use core::convert::From;
-use core::option::Option::{self, None, Some};
-use core::result::Result::{self, Err, Ok};
-use core::{assert, assert_eq};
-
-use super::{generate_short_name, long_name_split, short_name_format, split_name_ext};
-
 use super::{
-    ATTR_DIRECTORY, ATTR_LONG_NAME, DIRENT_SIZE, DIR_ENTRY_UNUSED, LAST_LONG_ENTRY,
-    NEW_VIR_FILE_CLUSTER, ORIGINAL,
+    entry::{LongDirEntry, ShortDirEntry},
+    generate_short_name, long_name_split, short_name_format, split_name_ext,
+    vfs::{DirEntryPos, VirtFile, VirtFileType},
+    ALL_UPPER_CASE, ATTR_DIRECTORY, ATTR_LONG_NAME, DIRENT_SIZE, DIR_ENTRY_UNUSED, LAST_LONG_ENTRY,
+    NEW_VIR_FILE_CLUSTER,
 };
 
+// TODO 虽然罗列了很多错误类型, 但是目前仅使用了部分
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DirError {
     NoMatchDir,
@@ -34,18 +54,18 @@ pub enum DirError {
 }
 
 pub trait Dir {
-    fn find(&self, path: Vec<&str>) -> Result<Arc<VirFile>, DirError>;
+    fn find(&self, path: Vec<&str>) -> Result<Arc<VirtFile>, DirError>;
 
-    fn create(&self, name: &str, file_type: VirFileType) -> Result<VirFile, DirError>;
+    fn create(&self, name: &str, file_type: VirtFileType) -> Result<VirtFile, DirError>;
 
     fn ls(&self) -> Result<Vec<String>, DirError>;
 
     fn remove(&self, path: Vec<&str>) -> Result<(), DirError>;
 }
 
-impl Dir for VirFile {
+impl Dir for VirtFile {
     /// 根据路径递归搜索文件
-    fn find(&self, path: Vec<&str>) -> Result<Arc<VirFile>, DirError> {
+    fn find(&self, path: Vec<&str>) -> Result<Arc<VirtFile>, DirError> {
         let len = path.len();
         if len == 0 {
             return Ok(Arc::new(self.clone()));
@@ -88,7 +108,7 @@ impl Dir for VirFile {
     }
 
     // Dir Functions
-    fn create(&self, name: &str, file_type: VirFileType) -> Result<VirFile, DirError> {
+    fn create(&self, name: &str, file_type: VirtFileType) -> Result<VirtFile, DirError> {
         // 检测同名文件
         assert!(self.is_dir());
         let option = self.find_by_name(name);
@@ -119,6 +139,7 @@ impl Dir for VirFile {
             let short_name = generate_short_name(name);
             let (_name, _ext) = short_name_format(short_name.as_str());
             sde = ShortDirEntry::new(NEW_VIR_FILE_CLUSTER, &_name, &_ext, file_type);
+            sde.set_name_case(ALL_UPPER_CASE); // TODO
 
             // 长文件名拆分
             let mut lfn_vec = long_name_split(name);
@@ -134,15 +155,10 @@ impl Dir for VirFile {
                     order |= 0x40;
                 }
                 // 初始化长文件名目录项
-                // let name = sde.name_bytes_array();
-                // let check_sum = generate_checksum(&name);
-
                 let lde = LongDirEntry::new_form_name_slice(
                     order,
                     lfn_vec.pop().unwrap(),
                     sde.gen_check_sum(),
-                    // Fix 统一 generate_checksum
-                    // check_sum,
                 );
                 // 写入长文件名目录项
                 let write_size = self.write_at(entry_offset, lde.as_bytes());
@@ -154,43 +170,47 @@ impl Dir for VirFile {
             // 短文件名
             let (_name, _ext) = short_name_format(name);
             sde = ShortDirEntry::new(NEW_VIR_FILE_CLUSTER, &_name, &_ext, file_type);
-            sde.set_name_case(ORIGINAL);
+            sde.set_name_case(ALL_UPPER_CASE); // TODO
+
+            // Linux中文件创建都会创建一个长文件名目录项, 用于处理文件大小写问题
+            let order: u8 = 1 | 0x40;
+            let name_array = long_name_split(name)[0];
+            let lde = LongDirEntry::new_form_name_slice(order, name_array, sde.gen_check_sum());
+            let write_size = self.write_at(entry_offset, lde.as_bytes());
+            assert_eq!(write_size, DIRENT_SIZE);
+            entry_offset += DIRENT_SIZE;
         }
 
         // 写短目录项(长文件名也是有短文件名目录项的)
         let wirte_size = self.write_at(entry_offset, sde.as_bytes());
         assert_eq!(wirte_size, DIRENT_SIZE);
-
         assert!(
             self.first_cluster() >= 2,
-            "first_cluster:{}",
+            "[fat32::Dir::create] first_cluster:{}",
             self.first_cluster()
         );
+
         // 验证
         if let Some(file) = self.find_by_name(name) {
             // 如果是目录类型, 需要创建.和..
-            if file_type == VirFileType::Dir {
-                // 先写入 .. 使得目录获取第一个簇
+            if file_type == VirtFileType::Dir {
+                // 先写入 .. 使得目录获取第一个簇 (否则 increase_size 不会分配簇而是直接返回, 导致 first_cluster 为 0, 进而 panic)
                 let (_name, _ext) = short_name_format("..");
                 let mut parent_sde = ShortDirEntry::new(
                     self.first_cluster() as u32,
                     &_name,
                     &_ext,
-                    VirFileType::Dir,
+                    VirtFileType::Dir,
                 );
-
-                // FIX fat32 规定目录文件大小为 0
-                // 注意文件大小的更新, 否则返回上级目录没法读
-                // let parent_file_size = self.file_size();
-                // parent_sde.set_file_size(parent_file_size as u32);
+                // fat32 规定目录文件大小为 0, 不要更新目录文件的大小
                 file.write_at(DIRENT_SIZE, parent_sde.as_bytes_mut());
 
                 let (_name, _ext) = short_name_format(".");
                 let mut self_sde = ShortDirEntry::new(
-                    file.first_cluster() as u32, // 先写入 .. 使得目录获取第一个簇, 否则 first_cluster 为 0
+                    file.first_cluster() as u32,
                     &_name,
                     &_ext,
-                    VirFileType::Dir,
+                    VirtFileType::Dir,
                 );
                 file.write_at(0, self_sde.as_bytes_mut());
             }
@@ -201,9 +221,9 @@ impl Dir for VirFile {
     }
 }
 
-impl VirFile {
+impl VirtFile {
     // Dir Functions
-    fn find_by_lfn(&self, name: &str) -> Option<VirFile> {
+    fn find_by_lfn(&self, name: &str) -> Option<VirtFile> {
         let name_vec = long_name_split(name);
         let name_cnt = name_vec.len();
         //  在目录文件中的偏移
@@ -211,8 +231,6 @@ impl VirFile {
         let mut lde = LongDirEntry::empty();
         let mut lde_pos_vec: Vec<DirEntryPos> = Vec::new();
         let name_last = name_vec[name_cnt - 1].clone();
-        // let dir_size = self.file_size(); // fix: dir size keep 0
-
         loop {
             let mut read_size = self.read_at(index, lde.as_bytes_mut());
             if read_size != DIRENT_SIZE {
@@ -235,7 +253,7 @@ impl VirFile {
                     index += DIRENT_SIZE;
                     continue;
                 }
-                // 如果order匹配通过, 开一个循环继续匹配长名目录项
+                // 如果 order 匹配通过, 开一个循环继续匹配长名目录项
                 let mut is_match = true;
                 for i in 1..order as usize {
                     read_size = self.read_at(index + i * DIRENT_SIZE, lde.as_bytes_mut());
@@ -260,8 +278,6 @@ impl VirFile {
                         return None;
                     }
                     if !sde.is_deleted() && checksum == sde.gen_check_sum() {
-                        // FIX
-                        // assert!(sde_offset <= self.file_size());
                         let sde_pos = self.dir_entry_pos(sde_offset).unwrap();
                         for i in 0..order as usize {
                             // 存入长名目录项位置了, 第一个在栈顶
@@ -269,19 +285,18 @@ impl VirFile {
                             lde_pos_vec.push(lde_pos.unwrap());
                         }
                         let file_type = if sde.attr() == ATTR_DIRECTORY {
-                            VirFileType::Dir
+                            VirtFileType::Dir
                         } else {
-                            VirFileType::File
+                            VirtFileType::File
                         };
 
-                        let clus_chain = self.file_cluster_chain(index);
+                        let clus_chain = self.file_cluster_chain(sde_offset);
 
-                        return Some(VirFile::new(
+                        return Some(VirtFile::new(
                             String::from(name),
                             sde_pos,
                             lde_pos_vec,
                             Arc::clone(&self.fs),
-                            Arc::clone(&self.device),
                             Arc::new(RwLock::new(clus_chain)),
                             file_type,
                         ));
@@ -292,7 +307,7 @@ impl VirFile {
         }
     }
 
-    fn find_by_sfn(&self, name: &str) -> Option<VirFile> {
+    fn find_by_sfn(&self, name: &str) -> Option<VirtFile> {
         let name = name.to_ascii_uppercase();
 
         let mut sde = ShortDirEntry::empty();
@@ -310,19 +325,18 @@ impl VirFile {
                 let sde_pos = self.dir_entry_pos(index).unwrap();
                 let lde_pos_vec: Vec<DirEntryPos> = Vec::new();
                 let file_type = if sde.attr() == ATTR_DIRECTORY {
-                    VirFileType::Dir
+                    VirtFileType::Dir
                 } else {
-                    VirFileType::File
+                    VirtFileType::File
                 };
 
                 let clus_chain = self.file_cluster_chain(index);
 
-                return Some(VirFile::new(
+                return Some(VirtFile::new(
                     String::from(name),
                     sde_pos,
                     lde_pos_vec,
                     Arc::clone(&self.fs),
-                    Arc::clone(&self.device),
                     Arc::new(RwLock::new(clus_chain)),
                     file_type,
                 ));
@@ -333,11 +347,10 @@ impl VirFile {
         }
     }
 
-    pub fn find_by_name(&self, name: &str) -> Option<VirFile> {
+    pub fn find_by_name(&self, name: &str) -> Option<VirtFile> {
         // 不是目录则退出
         assert!(self.is_dir());
         let (name_, ext_) = split_name_ext(name);
-        // TODO self 为父级目录
         if name_.len() > 8 || ext_.len() > 3 {
             //长文件名
             return self.find_by_lfn(name);
@@ -347,7 +360,7 @@ impl VirFile {
         }
     }
 
-    // 查找可用目录项, 返回offset, 簇不够也会返回相应的offset
+    // 查找可用目录项, 返回 offset, 簇不够也会返回相应的 offset
     fn empty_entry_index(&self) -> Result<usize, DirError> {
         if !self.is_dir() {
             return Err(DirError::NotDir);
@@ -356,7 +369,6 @@ impl VirFile {
         let mut index = 0;
         loop {
             let read_size = self.read_at(index, sde.as_bytes_mut());
-            // TODO 对于删除后的目录项移动管理: 建议实现 drop 时进行整理
             if read_size == 0 // 读到目录文件末尾 -> 超过 dir_size, 需要分配新簇 -> write_at 中处理 -> increase_size
             || sde.is_empty()
             {
@@ -367,16 +379,15 @@ impl VirFile {
         }
     }
 
-    pub fn vir_file_type(&self) -> VirFileType {
+    pub fn vir_file_type(&self) -> VirtFileType {
         if self.is_dir() {
-            VirFileType::Dir
+            VirtFileType::Dir
         } else {
-            VirFileType::File
+            VirtFileType::File
         }
     }
 
     // 返回二元组, 第一个是文件名, 第二个是文件属性(文件或者目录)
-    // TODO 使用 dir_entry_info 方法
     pub fn ls_with_attr(&self) -> Result<Vec<(String, u8)>, DirError> {
         if !self.is_dir() {
             return Err(DirError::NotDir);
@@ -395,7 +406,6 @@ impl VirFile {
                 offset += DIRENT_SIZE;
                 continue;
             }
-            // TODO 注意: Linux中文件创建都会创建一个长文件名目录项, 用于处理文件大小写问题
             if entry.attr() != ATTR_LONG_NAME {
                 // 短文件名
                 let sde: ShortDirEntry = unsafe { core::mem::transmute(entry) };

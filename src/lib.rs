@@ -1,4 +1,15 @@
-#![no_std]
+// #![no_std]
+
+use alloc::{string::String, vec::Vec};
+use core::{
+    convert::TryInto,
+    iter::Iterator,
+    option::Option::{None, Some},
+    str,
+};
+
+extern crate alloc;
+
 pub mod bpb;
 pub mod cache;
 pub mod device;
@@ -8,21 +19,6 @@ pub mod fat;
 pub mod file;
 pub mod fs;
 pub mod vfs;
-
-use crate::dir::DirError;
-use crate::entry::NameType;
-use crate::fat::ClusterChainErr;
-use crate::file::FileError;
-
-use core::convert::TryInto;
-use core::iter::Iterator;
-use core::option::Option::{self, None, Some};
-use core::str;
-
-extern crate alloc;
-
-use alloc::string::String;
-use alloc::vec::Vec;
 
 pub use bpb::*;
 pub use cache::*;
@@ -142,15 +138,7 @@ pub const MAX_CLUSTER_FAT32: usize = 268435445;
 pub const CLN_SHUT_BIT_MASK_FAT32: u32 = 0x08000000;
 pub const HRD_ERR_BIT_MASK_FAT32: u32 = 0x04000000;
 
-type Error = BlockDeviceError;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum BlockDeviceError {
-    ClusterChain(ClusterChainErr),
-    Dir(DirError),
-    File(FileError),
-}
-
+#[allow(unused)]
 pub(crate) fn read_le_u16(input: &[u8]) -> u16 {
     let (int_bytes, _) = input.split_at(core::mem::size_of::<u16>());
     u16::from_le_bytes(int_bytes.try_into().unwrap())
@@ -161,6 +149,7 @@ pub(crate) fn read_le_u32(input: &[u8]) -> u32 {
     u32::from_le_bytes(int_bytes.try_into().unwrap())
 }
 
+#[allow(unused)]
 pub(crate) fn is_illegal(chs: &str) -> bool {
     let illegal_char = "\\/:*?\"<>|";
     for ch in illegal_char.chars() {
@@ -171,6 +160,7 @@ pub(crate) fn is_illegal(chs: &str) -> bool {
     false
 }
 
+#[allow(unused)]
 pub(crate) fn sfn_or_lfn(name: &str) -> NameType {
     let (name, extension) = match name.find('.') {
         Some(i) => (&name[0..i], &name[i + 1..]),
@@ -191,6 +181,7 @@ pub(crate) fn sfn_or_lfn(name: &str) -> NameType {
     }
 }
 
+#[allow(unused)]
 /// 根据文件名, 返回需要的长目录项数目
 pub(crate) fn get_lde_cnt(value_str: &str) -> usize {
     // eg. value = "hello, 你好!" -> value.chars().count() = 10
@@ -199,6 +190,7 @@ pub(crate) fn get_lde_cnt(value_str: &str) -> usize {
     (num_char + LONG_NAME_LEN_CAP - 1) / LONG_NAME_LEN_CAP
 }
 
+#[allow(unused)]
 /// 根据文件名, 获取对应的第 count 个长目录项的名字对应于文件名的下标
 pub(crate) fn get_lfn_index(value_str: &str, count: usize) -> usize {
     let end = 13 * (count - 1);
@@ -209,14 +201,6 @@ pub(crate) fn get_lfn_index(value_str: &str, count: usize) -> usize {
         }
     }
     len
-}
-
-pub(crate) fn generate_checksum(value: &[u8]) -> u8 {
-    let mut checksum = 0;
-    for &i in value {
-        checksum = (if checksum & 1 == 1 { 0x80 } else { 0 } + (checksum >> 1) + i as u32) & 0xFF;
-    }
-    checksum as u8
 }
 
 pub(crate) fn get_needed_sector(value: usize) -> usize {
@@ -232,9 +216,9 @@ pub fn long_name_split(name: &str) -> Vec<[u16; 13]> {
     // 以 13个字符为单位进行切割, 每一组占据一个目录项
     let lfn_cnt = (len + LONG_NAME_LEN_CAP - 1) / LONG_NAME_LEN_CAP;
     if len < lfn_cnt * LONG_NAME_LEN_CAP {
-        name.push(0x00);
+        name.push(0x0000);
         while name.len() < (lfn_cnt * LONG_NAME_LEN_CAP) as usize {
-            name.push(0xFF);
+            name.push(0xFFFF);
         }
     }
     name.chunks(LONG_NAME_LEN_CAP as usize)
@@ -271,14 +255,14 @@ pub fn short_name_format(name: &str) -> ([u8; 8], [u8; 3]) {
     let mut f_ext = [0u8; 3];
     for i in 0..8 {
         if i >= name_bytes.len() {
-            f_name[i] = 0x20; // 不足的用0x20进行填充
+            f_name[i] = 0x20; // 不足的用 0x20 进行填充
         } else {
             f_name[i] = (name_bytes[i] as char).to_ascii_uppercase() as u8;
         }
     }
     for i in 0..3 {
         if i >= ext_bytes.len() {
-            f_ext[i] = 0x20; // 不足的用0x20进行填充
+            f_ext[i] = 0x20; // 不足的用 0x20 进行填充
         } else {
             f_ext[i] = (ext_bytes[i] as char).to_ascii_uppercase() as u8;
         }
@@ -303,7 +287,7 @@ pub fn generate_short_name(long_name: &str) -> String {
     for i in 0..3 {
         // fill extension
         if i >= ext_len {
-            short_name.push(0x20 as char); // 不足的用0x20进行填充
+            short_name.push(0x20 as char); // 不足的用 0x20 进行填充
         } else {
             short_name.push((extension[i] as char).to_ascii_uppercase());
         }
@@ -313,7 +297,8 @@ pub fn generate_short_name(long_name: &str) -> String {
 }
 
 // TODO
-// 1. change name
-// 2. time 处理
+// 1. 修改文件名
+// 2. 时间处理
 // 3. 长短名转化(~n)(目前只有~1)
-// 4. 删除文件后, 目录下的目录项的物理位置上的移动
+// 4. 虽然罗列了很多错误类型, 但是目前仅判断与处理了部分错误
+// 5. 提供更完善的错误信息以及错误处理
